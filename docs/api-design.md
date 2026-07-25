@@ -131,7 +131,7 @@ X-CSRF-Token: <CSRFトークン>
 
 ```
 POST /auth/login
-{ "login_id": "2410990001", "password": "..." }
+{ "login_id": "S0001", "password": "..." }
 ```
 
 - 成功時：ログインセッションのCookieを発行．`HttpOnly` / `Secure` / `SameSite=Lax`
@@ -176,13 +176,13 @@ QRを読み取るとカメラアプリから`/scan`へ遷移する．この遷�
 {
   "session": { "id": 12, "course_name": "情報セキュリティ", "required_scan_count": 2 },
   "rows": [
-    { "login_id": "2410990001", "display_name": "…", "status": "present",
+    { "login_id": "S0001", "display_name": "…", "status": "present",
       "scan_count": 2, "record_source": "auto", "alerts": [] },
-    { "login_id": "2410990002", "display_name": "…", "status": "present",
+    { "login_id": "S0002", "display_name": "…", "status": "present",
       "scan_count": 1, "record_source": "auto", "alerts": ["1回目のみ"] },
-    { "login_id": "2410990003", "display_name": "…", "status": "late",
+    { "login_id": "S0003", "display_name": "…", "status": "late",
       "scan_count": 1, "record_source": "manual", "alerts": [] },
-    { "login_id": "2410990004", "display_name": "…", "status": null,
+    { "login_id": "S0004", "display_name": "…", "status": null,
       "scan_count": 0, "record_source": null, "alerts": [] }
   ]
 }
