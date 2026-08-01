@@ -1,0 +1,27 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        # テスト実行用のダミー値．本物の秘密鍵は絶対に書かない（GitHub Secretsも使わない）
+        env:
+          TOKEN_SECRET: dummy-secret-for-ci-only
+          CAMPUS_IP_RANGES: 192.168.0.0/16
+        run: pytest -v
