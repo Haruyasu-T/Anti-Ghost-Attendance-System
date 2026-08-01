@@ -63,6 +63,30 @@ def verify_password(plain: str, password_hash: str) -> bool:
 - `passlib`（bcrypt）を使う．自前でハッシュ処理を書かない
 - `verify_password`は，ユーザーが存在しない場合でも**ダミーのハッシュに対して照合を実行する**．早期リターンすると応答時間の差からアカウントの存在が推測できる（タイミング攻撃）
 
+### ログインセッション
+
+サーバー側でセッションを保持する（`login_sessions`テーブル）．採用理由は[DB設計](db-design.md)の設計判断を参照．
+
+```python
+def create_login_session(user_id: int, client_ip: str, user_agent: str) -> str:
+    """新しいログインセッションを作成し，Cookieに入れるIDを返す．"""
+
+def get_session_user(session_id: str) -> User | None:
+    """セッションIDから利用者を引く．無効・期限切れ・失効済みならNone．"""
+
+def revoke_login_session(session_id: str) -> None:
+    """セッションを1つ失効させる（ログアウト）．"""
+
+def revoke_all_sessions_for_user(user_id: int) -> None:
+    """そのユーザーの全セッションを失効させる（乗っ取り対応）．"""
+```
+
+**実装上の必須事項**
+- セッションIDは`secrets.token_urlsafe(32)`等の**暗号論的乱数**で生成する．連番・UUIDv1・時刻由来の値は使わない（推測されるとセッションを乗っ取られる）
+- **Cookieに入れるのはセッションIDだけ**．ユーザーIDやロールをCookieに入れない
+- `get_session_user`は`revoked_at`と`expires_at`を必ず確認する．どちらかに該当したら`None`を返す
+- **ログイン成功時にセッションIDを再発行する**（セッション固定攻撃対策．攻撃者が事前に用意したIDのまま認証させない）
+
 ### 動的トークン
 
 ```python
@@ -123,11 +147,20 @@ def classify_attendance(
     """出席区分を返す．受付時間外ならNone．"""
 ```
 
+`scheduled_start_at`からの経過時間を`t`（分）とする．**境界値はすべて「学生に有利な側」に含める**と決定した．
+
 | 条件 | 戻り値 |
 |---|---|
-| `scheduled_start_at - 5分` 〜 `+5分` | `PRESENT` |
-| `+5分` 〜 `+20分` | `LATE` |
-| それ以外（早すぎる・遅すぎる） | `None`（受付不可） |
+| `t < -5` | `None`（早すぎる） |
+| `-5 <= t <= +5` | `PRESENT` |
+| `+5 < t <= +20` | `LATE` |
+| `t > +20` | `None`（受付終了） |
+
+- **`t = -5`ちょうど → `PRESENT`**（受付開始の瞬間から受け付ける）
+- **`t = +5`ちょうど → `PRESENT`**（遅刻にしない）
+- **`t = +20`ちょうど → `LATE`**（受付終了にしない）
+
+境界を学生に有利な側へ倒す理由は，1秒の差で不利益が生じると異議申し立てが増え，教員の手動修正への依存が高まるためである．手動修正はそれ自体が攻撃面であり，運用の摩擦を減らすことがセキュリティ上も望ましい．
 
 - `now`は**サーバー時刻**を渡す．クライアントから受け取った時刻を渡してはいけない
 - 「早すぎる」場合（開始5分前より前）も`None`を返す．授業前に前もって読み取っておく行為を防ぐ

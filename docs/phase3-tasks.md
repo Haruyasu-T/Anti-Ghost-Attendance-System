@@ -13,7 +13,7 @@
 
 ```
         B-1 models.py ──┬──> B-3 以降のAPI全部
-                        └──> A-6 以降（DB依存）
+                        └──> A-6 以降（DB依存：セッション・監査ログ・端末紐付け等）
 
 A-1〜A-5（DB不要）────────> 先行して着手できる
         └─ A-3 トークン ──> B-4, B-5 が依存
@@ -29,12 +29,11 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 
 `app/security.py` と認可まわり．**このプロジェクトで面接に直結する部分**なので，生成コードをそのまま通さず，1つずつ「なぜこの実装か」を説明できる状態にする．
 
-### A-1. 設定値の読み込みと `.env.example`
-- `.env.example`を作成（キー名のみ・値は空）
-- `.gitignore`に`.env`が含まれているか確認
-- [security-interface.md](security-interface.md)の設定値一覧を読み込む仕組みを作る
+### A-1. 設定値の読み込み
+- `.env.example`と`.gitignore`は設定済み．`cp .env.example .env`して各自の値を入れる
+- [security-interface.md](security-interface.md)の設定値一覧を`python-dotenv`で読み込む仕組みを作る
 - **`TOKEN_SECRET`が未設定なら起動時にエラーで停止させる**．開発用の既定値をコードに埋めない
-- 完了条件：`TOKEN_SECRET`を消して起動するとエラーで止まる
+- 完了条件：`TOKEN_SECRET`を空にして起動するとエラーで止まる
 
 ### A-2. パスワードのハッシュ化
 - `hash_password` / `verify_password`（passlib のbcrypt）
@@ -63,37 +62,50 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 
 ### A-5. 受付時間帯の判定
 - `classify_attendance(scheduled_start_at, now)` → `PRESENT` / `LATE` / `None`
+- **境界値は決定済み**（[decisions.md](decisions.md) D-10）：ちょうどの値は学生に有利な側に含める
 - 完了条件（pytest）：境界値をすべて確認する
-  - 開始5分前ちょうど → `PRESENT`
-  - 開始5分前より前 → `None`（早すぎる登録も拒否する）
-  - 開始5分後ちょうど → 仕様として`PRESENT`か`LATE`かを決めて明記
-  - 開始20分後ちょうど / それ以降 → 決めて明記，20分超は`None`
 
-> 境界がどちらに含まれるかは実装者が決めて**テストとコメントに残す**．曖昧なまま実装すると後で誰も分からなくなる．
+| 経過時間 `t`（分） | 期待値 |
+|---|---|
+| `t = -6` | `None`（早すぎる） |
+| `t = -5` ちょうど | `PRESENT` |
+| `t = 0` | `PRESENT` |
+| `t = +5` ちょうど | `PRESENT`（遅刻にしない） |
+| `t = +6` | `LATE` |
+| `t = +20` ちょうど | `LATE`（受付終了にしない） |
+| `t = +21` | `None`（受付終了） |
 
-### A-6. 認可の依存関数（B-1 完了後）
+### A-6. ログインセッション（B-1 完了後）
+- `create_login_session` / `get_session_user` / `revoke_login_session` / `revoke_all_sessions_for_user`
+- セッションIDは`secrets.token_urlsafe(32)`等の**暗号論的乱数**．連番やUUIDv1は使わない
+- **Cookieに入れるのはセッションIDだけ**．ユーザーIDやロールを入れない
+- `get_session_user`は`revoked_at`と`expires_at`を必ず確認する
+- **ログイン成功時にセッションIDを再発行する**（セッション固定攻撃対策）
+- 完了条件：`revoke_login_session`を呼んだ後，同じCookieでアクセスすると401になる
+
+### A-7. 認可の依存関数
 - `require_login()` / `require_role("teacher")` / `require_course_owner()` / `require_session_owner()`
 - FastAPIの`Depends`として宣言的に付ける形にする．各エンドポイントに`if`を書く方式にしない（1箇所の書き忘れが脆弱性になる）
 - 完了条件：学生のセッションで教員用エンドポイントを叩くと403，他の教員の授業を指定すると404
 
-### A-7. 監査ログ
+### A-8. 監査ログ
 - `write_audit_log(...)`
 - **パスワードとトークンを`detail`に入れない**
 - 完了条件：ログイン成功・失敗の両方が`audit_logs`に残る
 
-### A-8. 端末の紐付け
+### A-9. 端末の紐付け
 - `issue_device_id()` / `check_device_binding(device_id, user_id)`
 - HttpOnly Cookieで配る．**ブロックせず検知・記録のみ**
 - 完了条件：別アカウントで同じ`device_id`を使うと`conflict`が返り，`audit_logs`に記録される（登録自体は成功する）
 
-### A-9. レート制限
+### A-10. レート制限
 - `is_login_rate_limited(login_id, client_ip)`
 - **`login_id`別と`client_ip`別の両方**を見る（片方だけだと分散攻撃か総当たりのどちらかを取り逃す）
 
-### A-10. バースト検知
+### A-11. バースト検知
 - `detect_burst(attendance_session_id, client_ip)`
 
-### A-11. 継続タスク：B・CのPRレビュー
+### A-12. 継続タスク：B・CのPRレビュー
 セキュリティ観点で見る．特に：
 - 認可の依存関数が付いているか（付け忘れが最大のリスク）
 - クライアントから来た値を判定に使っていないか
@@ -107,7 +119,7 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 `app/models.py` と `app/main.py`．
 
 ### B-1. models.py ★最優先・全員のブロッカー
-- [DB設計](db-design.md)のDDLに対応するSQLAlchemyモデル（9テーブル）
+- [DB設計](db-design.md)のDDLに対応するSQLAlchemyモデル（10テーブル）
 - **接続ごとに`PRAGMA foreign_keys = ON`を実行する**．SQLiteは外部キーがデフォルト無効で、忘れると`REFERENCES`が飾りになる
 - 一意制約を必ず入れる：`attendances(attendance_session_id, user_id)` と `attendance_scans(attendance_session_id, user_id, scan_seq)`
 - 完了条件：DBを作成し、同じ`(session, user)`で2行入れようとすると**DBが拒否する**ことを確認
@@ -121,7 +133,7 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 - `POST /auth/login` / `POST /auth/logout` / `GET /auth/me`
 - Cookieは`HttpOnly` / `Secure` / `SameSite=Lax`
 - **失敗時に「IDが無い」と「パスワードが違う」を区別しない**
-- レート制限（A-9）と監査ログ（A-7）を組み込む
+- セッション管理（A-6）・レート制限（A-10）・監査ログ（A-8）を組み込む
 
 ### B-4. 出席セッション系API
 - `POST /courses/{id}/attendance-sessions`（`scheduled_start_at`を受け取る）
@@ -190,9 +202,10 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 - HTTPSが使えることが必須（トークンとCookieを平文で流さない）
 - 環境変数の設定方法を確認（`TOKEN_SECRET`をどこに置くか）
 
-### C-9. （余力があれば）GitHub Actions
-- pushで`pytest`を自動実行
-- これができると`main`のBranch protectionで「テストが通らないとマージできない」設定を有効にできる
+### C-9. CIの有効化
+- `.github/workflows/test.yml`は設置済み（pushとPRで`pytest`を自動実行する）
+- 最初のテストがマージされたら，`main`のBranch protectionで「Require status checks to pass before merging」を有効にする
+- フェーズ1で設定できなかった項目がここで回収できる
 
 ### 担当Cが踏みやすい落とし穴
 1. トークンを`localStorage`に保存しない（XSSで盗まれる経路を作る）
