@@ -83,6 +83,8 @@ def revoke_all_sessions_for_user(user_id: int) -> None:
 
 **実装上の必須事項**
 - セッションIDは`secrets.token_urlsafe(32)`等の**暗号論的乱数**で生成する．連番・UUIDv1・時刻由来の値は使わない（推測されるとセッションを乗っ取られる）
+- **DBに保存するのはセッションIDのSHA-256ハッシュ**．生の値は保存しない．`create_login_session`は生の値を返し（Cookieに入れる），DBには`id_hash`だけを書く．`get_session_user`は受け取った値をハッシュ化して照合する
+  - こうするとDBが漏れてもセッションを乗っ取れない．セッションIDは十分長い乱数なので低速ハッシュは不要でSHA-256で足りる
 - **Cookieに入れるのはセッションIDだけ**．ユーザーIDやロールをCookieに入れない
 - `get_session_user`は`revoked_at`と`expires_at`を必ず確認する．どちらかに該当したら`None`を返す
 - **ログイン成功時にセッションIDを再発行する**（セッション固定攻撃対策．攻撃者が事前に用意したIDのまま認証させない）
@@ -90,18 +92,23 @@ def revoke_all_sessions_for_user(user_id: int) -> None:
 ### 動的トークン
 
 ```python
-def generate_token(session_id: int, at: datetime | None = None) -> str:
+def new_token_salt() -> str:
+    """セッション固有の塩を生成する（セッション開始時・作り直し時に呼ぶ）．"""
+
+def generate_token(session_id: int, token_salt: str,
+                   at: datetime | None = None) -> str:
     """指定時刻の世代に対応するトークンを返す．at=Noneなら現在時刻．"""
 
-def verify_token(session_id: int, token: str, at: datetime | None = None) -> bool:
+def verify_token(session_id: int, token_salt: str, token: str,
+                 at: datetime | None = None) -> bool:
     """トークンが現在世代または直前世代として妥当かを判定する．"""
 ```
 
 **方式**
 
 ```
-window     = floor(unix_time / QR_ROTATE_SECONDS)
-token      = HMAC-SHA256(TOKEN_SECRET, f"{session_id}:{window}") の先頭16文字（16進）
+window = floor(unix_time / QR_ROTATE_SECONDS)
+token  = HMAC-SHA256(TOKEN_SECRET, f"{session_id}:{token_salt}:{window}") の先頭16文字（16進）
 ```
 
 **検証**：`window`と`window - 1`（`TOKEN_ACCEPT_PREVIOUS_WINDOWS`の数だけ遡る）について再計算し，一致するか調べる．
@@ -109,11 +116,17 @@ token      = HMAC-SHA256(TOKEN_SECRET, f"{session_id}:{window}") の先頭16文�
 **実装上の必須事項**
 - 比較は`hmac.compare_digest`を使う（`==`は文字列の一致位置によって処理時間が変わり，1文字ずつ推測される余地がある）
 - `session_id`をHMACの入力に含めることで，**別のセッションのトークンを流用できないようにする**（同時刻に2つの授業が開講されていても互いのQRは使えない）
+- `token_salt`を混ぜることで，**`TOKEN_SECRET`の漏洩だけではトークンを生成できないようにする**．攻撃者は対象セッションの塩をDBから入手する必要がある
+- `new_token_salt`は`secrets.token_urlsafe(16)`等の暗号論的乱数を使う
 - `at`引数はテスト専用．本番の呼び出しでは省略し，サーバー時刻を使う
+- **`token_salt`は引数として受け取る**．`security.py`からDBを引かない（純粋関数のままにしてテストしやすさを保つため）
+
+**塩の作り直しによる失効**
+「QRを撮影されて出回った」と教員が気付いた場合，`token_salt`を作り直すと**出回っている全てのQRが即座に無効になる**．これは秘密鍵のみから導出する方式にはできなかった操作である．
 
 **この方式の限界（脅威モデルに記載）**
-- ワンタイム化ができない（同じ世代内なら同じトークンが何度でも通る）→ 二重登録はDBの一意制約と`scan_seq`で防ぐ
-- `TOKEN_SECRET`が漏れると任意のセッション・任意の時刻のトークンを生成できる → 教室にいなくても出席できる
+- ワンタイム化はしない（同じ世代内なら同じトークンが複数人に通る）．QRを多数の学生が同時に読む以上これは必須の性質であり，二重登録はDBの一意制約と`scan_seq`で防ぐ
+- `TOKEN_SECRET`と`token_salt`の**両方**が漏れると，そのセッションのトークンを任意に生成できる
 
 ### アクセス元IPの判定
 
