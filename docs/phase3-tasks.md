@@ -41,17 +41,20 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 - 完了条件：正しいパスワードで`True`，誤りで`False`．同じ平文でもハッシュが毎回変わること（ソルト）を確認
 
 ### A-3. 動的トークンの生成・検証 ★心臓部
-- `generate_token(session_id, at=None)` / `verify_token(session_id, token, at=None)`
-- 方式：`HMAC-SHA256(TOKEN_SECRET, f"{session_id}:{window}")` の先頭16文字．`window = floor(unix時刻 / QR_ROTATE_SECONDS)`
+- `new_token_salt()` / `generate_token(session_id, token_salt, at=None)` / `verify_token(session_id, token_salt, token, at=None)`
+- 方式：`HMAC-SHA256(TOKEN_SECRET, f"{session_id}:{token_salt}:{window}")` の先頭16文字．`window = floor(unix時刻 / QR_ROTATE_SECONDS)`
 - **必須事項**
   - 比較は `hmac.compare_digest`（`==`はタイミング攻撃の余地がある）
   - `session_id`をHMACの入力に含める（別セッションのトークンを流用させない）
+  - `token_salt`を混ぜる（`TOKEN_SECRET`の漏洩だけでは破られないようにする）
+  - `token_salt`は**引数で受け取る**．`security.py`からDBを引かない（純粋関数のままテストできる状態を保つ）
   - 現在世代と直前1世代を受け付ける
 - 完了条件（pytest）
   - 生成直後のトークンが通る
   - 1世代前のトークンが通る
   - 2世代前のトークンが**通らない**
   - 別の`session_id`のトークンが**通らない**
+  - **別の`token_salt`のトークンが通らない**（塩を作り直すと失効することの確認）
   - 1文字書き換えたトークンが**通らない**
 
 ### A-4. アクセス元IPの判定
@@ -78,6 +81,7 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 ### A-6. ログインセッション（B-1 完了後）
 - `create_login_session` / `get_session_user` / `revoke_login_session` / `revoke_all_sessions_for_user`
 - セッションIDは`secrets.token_urlsafe(32)`等の**暗号論的乱数**．連番やUUIDv1は使わない
+- **DBに保存するのはセッションIDのSHA-256ハッシュ**．生の値は保存しない（DBが漏れても乗っ取られないようにする）
 - **Cookieに入れるのはセッションIDだけ**．ユーザーIDやロールを入れない
 - `get_session_user`は`revoked_at`と`expires_at`を必ず確認する
 - **ログイン成功時にセッションIDを再発行する**（セッション固定攻撃対策）
@@ -120,6 +124,7 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 
 ### B-1. models.py ★最優先・全員のブロッカー
 - [DB設計](db-design.md)のDDLに対応するSQLAlchemyモデル（10テーブル）
+- `attendance_sessions.token_salt`と`login_sessions.id_hash`を忘れずに入れる
 - **接続ごとに`PRAGMA foreign_keys = ON`を実行する**．SQLiteは外部キーがデフォルト無効で、忘れると`REFERENCES`が飾りになる
 - 一意制約を必ず入れる：`attendances(attendance_session_id, user_id)` と `attendance_scans(attendance_session_id, user_id, scan_seq)`
 - 完了条件：DBを作成し、同じ`(session, user)`で2行入れようとすると**DBが拒否する**ことを確認
@@ -138,7 +143,8 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 ### B-4. 出席セッション系API
 - `POST /courses/{id}/attendance-sessions`（`scheduled_start_at`を受け取る）
 - `GET /attendance-sessions/{id}/token` ← **最も認可を間違えてはいけないエンドポイント．教員かつ担当授業のみ**
-- `POST /attendance-sessions/{id}/rescan` / `POST .../close`
+- `POST /attendance-sessions/{id}/rescan` / `POST .../rotate-token` / `POST .../close`
+- セッション開始時に`new_token_salt()`で塩を生成して保存する
 - 完了条件：**学生のセッションで`/token`を叩くと403**（テストを必ず書く）
 
 ### B-5. 出席登録API ★核心
@@ -189,6 +195,7 @@ C-1〜C-2（モックで先行可）──> B-3 完成後に結合
 - **更新までの残り時間を視覚的に出す**（切り替わる直前に読み始めて失敗するのを減らす）
 - QRは投影前提で大きく．登録済み人数と受付中の区分も表示
 - 「2回目のQRを表示」ボタン（確認ダイアログは出さない．学生に気付かれる前に押せるように）
+- 「QRを作り直す」ボタン（**こちらは確認ダイアログを出す**．全員が再読み取りになるため）
 
 ### C-6. 出席状況一覧（S7）と手動修正ダイアログ
 - 履修者全員を表示．「1回目のみ」に警告マーク（ただし自動で欠席にはしない）

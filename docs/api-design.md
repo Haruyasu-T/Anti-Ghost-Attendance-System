@@ -27,6 +27,7 @@
 | GET | `/attendance-sessions/{id}` | teacher＋担当 | セッションの状態 |
 | GET | `/attendance-sessions/{id}/token` | **teacher＋担当** | 現在有効なトークンを取得（QR描画用） |
 | POST | `/attendance-sessions/{id}/rescan` | teacher＋担当 | 2回目以降のQR再表示を開始 |
+| POST | `/attendance-sessions/{id}/rotate-token` | teacher＋担当 | QRを作り直す（出回ったQRを即座に失効させる） |
 | POST | `/attendance-sessions/{id}/close` | teacher＋担当 | セッションを終了 |
 | GET | `/attendance-sessions/{id}/attendances` | teacher＋担当 | 出席状況の一覧（履修者全員・未読み込み者を含む） |
 | PATCH | `/attendances/{id}` | teacher＋担当 | 出席記録の手動修正 |
@@ -169,6 +170,13 @@ QRを読み取るとカメラアプリから`/scan`へ遷移する．この遷�
 - `required_scan_count`を1つ増やす
 - 事前設定ではなく，教員がその場で押す（要件の決定事項通り）
 - `audit_logs`に`rescan_start`として記録
+
+### POST /attendance-sessions/{id}/rotate-token
+
+- `token_salt`を作り直す．これにより**出回っている全てのQRが即座に無効になる**
+- 用途：QRが撮影されて拡散された疑いがあるときの緊急対応
+- `audit_logs`に`token_rotate`として記録
+- **副作用**：実行した瞬間に読み取り中だった学生も失敗するため，再読み取りが必要になる．画面上でその旨を確認してから実行させる
 
 ### GET /attendance-sessions/{id}/attendances
 
