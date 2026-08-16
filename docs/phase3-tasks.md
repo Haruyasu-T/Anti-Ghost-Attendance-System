@@ -75,7 +75,7 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 タイムゾーンなしの `datetime` は `ValueError` で落とす．
 
-### A-6. ログインセッション ⚠ 実装済み・B-1待ち
+### A-6. ログインセッション ✅ 実装済み
 
 `create_login_session` / `get_session_user` / `revoke_login_session` / `revoke_all_sessions_for_user`．
 
@@ -87,9 +87,9 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 完了の目安：`revoke_login_session` を呼んだ後，同じCookieでアクセスすると401になる．
 
-**B-1側で足りないもの**：`LoginSession` の `revoked_at` / `created_at` / `client_ip` / `user_agent`．特に `revoked_at` が無いと失効させられず，サーバー側セッションを選んだ意味が無くなる．
+B-1のマージにより動作確認済み．
 
-### A-7. 認可の依存関数 ⚠ 実装済み・B-1待ち
+### A-7. 認可の依存関数 ✅ 実装済み
 
 `require_login()` / `require_role("teacher")` / `require_course_owner()` / `require_session_owner()`．
 
@@ -100,9 +100,9 @@ DBセッションの受け渡しに `app/db.py` も暫定で作った（担当B�
 
 完了の目安：学生のセッションで教員用エンドポイントを叩くと403，他の教員の授業を指定すると404．
 
-**B-1待ち**：`Course` / `AttendanceSession` を引くため．動作確認はB-1完了後．
 
-### A-8. 監査ログ ⚠ 実装済み・B-1待ち
+
+### A-8. 監査ログ ✅ 実装済み
 
 `write_audit_log(db, ...)` と `write_audit_log_now(session_factory, ...)` の2つ．
 
@@ -114,22 +114,27 @@ DBセッションの受け渡しに `app/db.py` も暫定で作った（担当B�
 
 完了の目安：ログイン成功・失敗の両方が `audit_logs` に残る．
 
-**B-1側で足りないもの**：`AuditLog` テーブルそのもの．A-10（レート制限）と
-A-11（バースト検知）もこれを読むので，同時に止まっている．
 
-### A-9. 端末の紐付け
+
+### A-9. 端末の紐付け ✅ 実装済み
 
 `issue_device_id()` / `check_device_binding(device_id, user_id)`．HttpOnly Cookieで配る．ブロックせず検知・記録だけ．
 
 完了の目安：別アカウントで同じ `device_id` を使うと `conflict` が返り `audit_logs` に記録される．登録自体は成功する．
 
-### A-10. レート制限
+### A-10. レート制限 ✅ 実装済み
 
 `is_login_rate_limited(login_id, client_ip)`．`login_id` 別と `client_ip` 別の両方を見る．片方だけだと分散攻撃か総当たりのどちらかを取り逃す．
 
-### A-11. バースト検知
+### A-11. バースト検知 ✅ 実装済み
 
-`detect_burst(attendance_session_id, client_ip)`．
+`detect_burst(db, attendance_session_id, device_id=None, client_ip=None)`．
+
+数えるのは件数ではなく人数（重複しない `user_id`）．1人が1回目と2回目を読むのは
+正常なので，件数で数えると誤検知になる．
+
+判定の主役は `device_id`．外部にデプロイすると学内の学生は全員が大学のNATの
+出口IPで届くため，IPでの判定はほぼ機能しない．
 
 ### A-12. B・CのPRレビュー（継続）
 
