@@ -1,34 +1,68 @@
-# ブランチ運用ルール
+# 開発の進め方
 
-2人チーム開発を前提にしたルール．
+3人で開発するにあたって決めたルール．
 
-## ブランチ構成
-- `main`：常に動く状態を保つ．直接コミット禁止．
-- 作業ブランチ：`main`から都度切る．レビューされてマージされたら削除．
+## ブランチ
 
-## ブランチ命名規則
-- `feature/xxx`：新機能（例: `feature/dynamic-qr-token`, `feature/ip-verification`）
-- `fix/xxx`：バグ修正（例: `fix/duplicate-attendance`）
-- `docs/xxx`：ドキュメントのみ（例: `docs/threat-model`）
+`main` は常に動く状態を保つ．直接コミットしない．
+
+作業ブランチは `main` から都度切って，マージされたら削除する．
+
+名前の付け方：
+
+- `feature/xxx` — 新機能（例：`feature/dynamic-qr-token`，`feature/ip-verification`）
+- `fix/xxx` — バグ修正（例：`fix/duplicate-attendance`）
+- `docs/xxx` — ドキュメントのみ（例：`docs/threat-model`）
 
 機能単位で切る．
 
-## 作業フロー
-1. `git checkout main && git pull` で最新化してから新しいブランチを切る
-2. 作業してコミット（こまめに，1コミット=1つの意味のある変更）
-3. `git push -u origin <ブランチ名>`
-4. GitHubでPull Requestを作成する．タイトルは変更内容が分かるように，本文には「何を」「なぜ」「セキュリティ機能なら限界は何か」を書く
-5. もう片方が読んでコメント／Approve
-6. Approveが付いたら **Squash and merge** でマージ（コミット履歴をきれいに保つため）
-7. マージ後はブランチを削除する
+## 作業の流れ
 
-## GitHub側の設定（Branch protection rule）
-`Settings → Branches → Add rule` で `main` に対して以下を設定する．
+```bash
+git checkout main
+git pull
+git checkout -b feature/xxx
+```
+
+作業してコミットする．コミットはこまめに，1コミット1つの意味のある変更で．
+
+```bash
+git push -u origin feature/xxx
+```
+
+GitHubでPull Requestを作る．タイトルは変更内容が分かるように．本文には「何を」「なぜ」を書き，セキュリティに関わる機能なら「限界は何か」も書く．
+
+作者以外の1人以上がレビューしてApproveしたら Squash and merge．履歴をきれいに保つため．マージ後はブランチを削除する．
+
+## レビューで見ること
+
+- 設計文書と食い違っていないか
+- 認可の依存関数が付いているか（付け忘れが一番危ない）
+- クライアントから来た値を判定の根拠にしていないか
+- エラーメッセージで内部情報を漏らしていないか
+
+生成したコードをそのままマージしない．1つずつ「なぜこうなっているか」を確認してから通す．
+
+## mainの保護設定
+
+GitHubの Settings → Branches で `main` に対して設定してある．
+
 - Require a pull request before merging
 - Require approvals（1件以上）
-- Do not allow bypassing the above settings
-- Require branches to be up to date before merging
 
-## 衝突を避けるコツ
-- 触るファイルが被りそうな作業は事前に一言共有する（例: `security.py`と`main.py`を同時に触る等）
-- 長期化しそうなブランチは定期的に`main`を取り込む（`git merge main`または`git pull origin main`）
+テストが揃ったら「Require status checks to pass before merging」も有効にする（フェーズ1の時点ではCIが無く設定できなかった）．
+
+## コンフリクトを避けるために
+
+- 触るファイルが被りそうなときは事前に一声かける（`security.py` と `main.py` を同時に触る場合など）
+- 長引きそうなブランチは定期的に `main` を取り込む（`git merge main` か `git pull origin main`）
+- 設計文書のシグネチャを変えたくなったら，先に文書を更新してから実装する
+
+## コミットとリポジトリで気をつけること
+
+リポジトリは最終的に公開する予定なので，以下は絶対に入れない．
+
+- `TOKEN_SECRET` の値（`.env` は `.gitignore` 済み）
+- 実際の学内IPレンジ
+- 実在の学籍番号・氏名・メールアドレス（例には `S0001` のような架空の値を使う）
+- 本物のパスワード（テストコードへの直書きも含む）
