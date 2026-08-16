@@ -220,7 +220,7 @@ class ManualCorrection(Base):
     teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     before_status = Column(String)
     after_status = Column(String, nullable=False)
-    reason = Column(String)
+    reason = Column(String, nullable=False)
     client_ip = Column(String)
     corrected_at = Column(String, nullable=False,
                           server_default=text("(datetime('now'))"))
