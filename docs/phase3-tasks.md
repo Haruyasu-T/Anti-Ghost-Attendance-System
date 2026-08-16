@@ -75,7 +75,7 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 タイムゾーンなしの `datetime` は `ValueError` で落とす．
 
-### A-6. ログインセッション（B-1完了後）
+### A-6. ログインセッション ⚠ 実装済み・B-1待ち
 
 `create_login_session` / `get_session_user` / `revoke_login_session` / `revoke_all_sessions_for_user`．
 
@@ -87,19 +87,35 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 完了の目安：`revoke_login_session` を呼んだ後，同じCookieでアクセスすると401になる．
 
-### A-7. 認可の依存関数
+**B-1側で足りないもの**：`LoginSession` の `revoked_at` / `created_at` / `client_ip` / `user_agent`．特に `revoked_at` が無いと失効させられず，サーバー側セッションを選んだ意味が無くなる．
+
+### A-7. 認可の依存関数 ⚠ 実装済み・B-1待ち
 
 `require_login()` / `require_role("teacher")` / `require_course_owner()` / `require_session_owner()`．
 
 FastAPIの `Depends` として宣言的に付ける形にする．各エンドポイントに `if` を書く方式にしない．1箇所の書き忘れがそのまま脆弱性になる．
 
+`app/auth.py` に置いた．`security.py` をHTTPから切り離しておくため．
+DBセッションの受け渡しに `app/db.py` も暫定で作った（担当Bが引き取ってよい）．
+
 完了の目安：学生のセッションで教員用エンドポイントを叩くと403，他の教員の授業を指定すると404．
 
-### A-8. 監査ログ
+**B-1待ち**：`Course` / `AttendanceSession` を引くため．動作確認はB-1完了後．
 
-`write_audit_log(...)`．パスワードとトークンを `detail` に入れない．
+### A-8. 監査ログ ⚠ 実装済み・B-1待ち
+
+`write_audit_log(db, ...)` と `write_audit_log_now(session_factory, ...)` の2つ．
+
+後者は独立したトランザクションで即コミットする．失敗して例外を投げる経路で
+前者を使うと，ロールバックでログごと消えてしまうため．拒否された試行こそ
+後から追いたい情報なので経路を分けた．
+
+パスワードとトークンを `detail` に入れない．秘密鍵の混入は実装側でも弾く．
 
 完了の目安：ログイン成功・失敗の両方が `audit_logs` に残る．
+
+**B-1側で足りないもの**：`AuditLog` テーブルそのもの．A-10（レート制限）と
+A-11（バースト検知）もこれを読むので，同時に止まっている．
 
 ### A-9. 端末の紐付け
 

@@ -73,11 +73,15 @@ def verify_password(plain: str, password_hash: str | None) -> bool: ...
 サーバー側で保持する（`login_sessions` テーブル）．理由は[DB設計](db-design.md)の設計メモを参照．
 
 ```python
-def create_login_session(user_id: int, client_ip: str, user_agent: str) -> str: ...
-def get_session_user(session_id: str) -> User | None: ...
-def revoke_login_session(session_id: str) -> None: ...
-def revoke_all_sessions_for_user(user_id: int) -> None: ...
+def create_login_session(db, user_id: int,
+                         client_ip: str | None = None,
+                         user_agent: str | None = None) -> str: ...
+def get_session_user(db, session_id: str | None) -> User | None: ...
+def revoke_login_session(db, session_id: str | None) -> None: ...
+def revoke_all_sessions_for_user(db, user_id: int) -> int: ...
 ```
+
+DBセッションは第1引数で受け取る．`security.py` の中でセッションを作らないことで，テスト時に使い捨てのDBを渡せる状態を保つ（当初の案では引数に無かったが，実装時に変更した）．
 
 守ること：
 
@@ -218,6 +222,7 @@ def detect_burst(attendance_session_id: int, client_ip: str) -> bool: ...
 
 ```python
 def write_audit_log(
+    db,
     action: str,
     result: str,                      # "success" | "failure"
     actor_user_id: int | None = None,
@@ -228,13 +233,22 @@ def write_audit_log(
     device_id: str | None = None,
     detail: str | None = None,
 ) -> None: ...
+
+def write_audit_log_now(session_factory, **kwargs) -> None: ...
 ```
+
+**2つある理由**（実装時に気付いた点）．
+
+`write_audit_log` は呼び出し側のトランザクションに書く．手動修正のように「記録と本体の変更が必ずセットで残る／両方消える」必要がある場面はこちら．
+
+ところが，このあと例外を投げてロールバックする経路（ログイン失敗，出席登録の拒否など）で使うと，**ログごと消えてしまう**．拒否された試行こそ後から追いたい情報なので，そこを取りこぼさないよう `write_audit_log_now` を用意した．こちらは独立したトランザクションで書いて即コミットするので，呼び出し側がロールバックしても残る．
 
 呼び出す側の責任：
 
 - 出席登録は成功も失敗も記録する．失敗理由を `detail` に入れる
+- **失敗して例外を投げる経路では `write_audit_log_now` を使う**
 - 手動修正は `manual_corrections` への記録と同じトランザクションで行い，ログの書き込みが失敗したら修正をロールバックする
-- `detail` にパスワードとトークンを入れない
+- `detail` にパスワードとトークンを入れない．秘密鍵の混入は実装側でも弾いているが，約束事として守ること
 
 ## main.py 側から見た呼び出し（出席登録）
 
