@@ -1,19 +1,19 @@
-"""app/models.py（B-1）
+"""
 
 出席管理システムのデータモデル定義．
 
 設計方針
 ----------------------------------------------------------------------
 - アプリ側のバリデーションが漏れても最後の防壁として機能するよう，
-  可能な制約はすべて DB レベル（NOT NULL / CHECK / UNIQUE / FOREIGN KEY）
-  で表現する（⑤安全なデフォルト）．
+    可能な制約はすべて DB レベル（NOT NULL / CHECK / UNIQUE / FOREIGN KEY）
+    で表現する（⑤安全なデフォルト）．
 - SQLite は接続ごとに `PRAGMA foreign_keys = ON` を発行しないと外部キー制約が
-  無効化されたままになるため，`create_db_engine()` で接続時に必ず有効化する．
+    無効化されたままになるため，`create_db_engine()` で接続時に必ず有効化する．
 - 時刻カラムは UTC の ISO 8601 文字列（例: "2026-07-27T01:00:00Z"）として
-  保存する．タイムゾーン変換や比較演算はアプリ層の責務とし，DB 層では文字列
-  として素直に保持する．
+    保存する．タイムゾーン変換や比較演算はアプリ層の責務とし，DB 層では文字列
+    として素直に保持する．
 - ログインセッションは生のセッションIDを保存せず，SHA-256 等でハッシュ化した
-  `id_hash` のみを主キーとして保存する（漏洩時の被害を限定するため）．
+    `id_hash` のみを主キーとして保存する（漏洩時の被害を限定するため）．
 """
 
 from __future__ import annotations
@@ -27,9 +27,11 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     event,
+    Index
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.sql import text
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
@@ -64,6 +66,8 @@ class User(Base):
     role = Column(String, nullable=False)
     display_name = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
+    created_at = Column(String, nullable=False,
+                        server_default=text("(datetime('now'))"))
 
     __table_args__ = (
         CheckConstraint("role IN ('student', 'teacher')",
@@ -79,6 +83,8 @@ class Course(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
     teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(String, nullable=False,
+                        server_default=text("(datetime('now'))"))
 
 
 # ---------------------------------------------------------- Enrollment
@@ -98,16 +104,17 @@ class AttendanceSession(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     course_id = Column(Integer, ForeignKey("courses.id"), nullable=False)
     scheduled_start_at = Column(String, nullable=False)
-    started_at = Column(String, nullable=True)
-    status = Column(String, nullable=False)
-    required_scan_count = Column(Integer, nullable=False)
+    started_at = Column(String, nullable=False)
+    closed_at = Column(String)
+    status = Column(String, nullable=False, default="open")
+    required_scan_count = Column(Integer, nullable=False, default=1)
     # トークン導出を秘密鍵だけに依存させないための塩．NOT NULL 必須（decisions.md D-3）．
     token_salt = Column(String, nullable=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     __table_args__ = (
         CheckConstraint(
-            "status IN ('scheduled', 'open', 'closed')",
+            "status IN ('open', 'closed')",
             name="ck_attendance_sessions_status",
         ),
     )
@@ -126,7 +133,7 @@ class Attendance(Base):
     )
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     status = Column(String, nullable=False)
-    record_source = Column(String, nullable=False)
+    record_source = Column(String, nullable=False, default="auto")
     first_recorded_at = Column(String, nullable=False)
 
     __table_args__ = (
@@ -162,7 +169,8 @@ class AttendanceScan(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     scan_seq = Column(Integer, nullable=False)
     scanned_at = Column(String, nullable=False)
-    client_ip = Column(String, nullable=True)
+    client_ip = Column(String, nullable=False)
+    device_id = Column(String)
 
     __table_args__ = (
         UniqueConstraint(
@@ -189,3 +197,70 @@ class LoginSession(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     last_used_at = Column(String, nullable=False)
     expires_at = Column(String, nullable=False)
+    created_at = Column(String, nullable=False,
+                        server_default=text("(datetime('now'))"))
+    revoked_at = Column(String)
+    client_ip = Column(String)
+    user_agent = Column(String)
+
+    __table_args__ = (
+        Index("idx_login_sessions_user", "user_id"),
+    )
+
+
+class ManualCorrection(Base):
+    """手動修正の監査ログ"""
+
+    __tablename__ = "manual_corrections"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    attendance_session_id = Column(Integer, ForeignKey(
+        "attendance_sessions.id"), nullable=False)
+    target_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    before_status = Column(String)
+    after_status = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    client_ip = Column(String)
+    corrected_at = Column(String, nullable=False,
+                          server_default=text("(datetime('now'))"))
+
+
+class DeviceBinding(Base):
+    """アカウントの端末を記録する"""
+
+    __tablename__ = "device_bindings"
+
+    device_id = Column(String, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    first_seen_at = Column(String, nullable=False)
+    last_seen_at = Column(String, nullable=False)
+
+
+class AuditLog(Base):
+    """行動を記録する"""
+
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    occurred_at = Column(String, nullable=False,
+                         server_default=text("(datetime('now'))"))
+    action = Column(String, nullable=False)
+    result = Column(String, nullable=False)
+    actor_user_id = Column(Integer, ForeignKey("users.id"))
+    attempted_login_id = Column(String)
+    target_type = Column(String)
+    target_id = Column(Integer)
+    client_ip = Column(String)
+    device_id = Column(String)
+    detail = Column(String)
+
+    __table_args__ = (
+        CheckConstraint(
+            "result IN ('success', 'failure')",
+            name="ck_audit_logs_result",
+        ),
+        Index("idx_audit_logs_action_time", "action", "occurred_at"),
+        Index("idx_audit_logs_ip_time", "client_ip", "occurred_at"),
+        Index("idx_audit_logs_login_time", "attempted_login_id", "occurred_at"),
+    )
