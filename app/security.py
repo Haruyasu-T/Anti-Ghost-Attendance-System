@@ -444,3 +444,163 @@ def write_audit_log_now(session_factory, **kwargs) -> None:
     with session_factory() as audit_db:
         write_audit_log(audit_db, **kwargs)
         audit_db.commit()
+
+
+# ================================================== A-9. 端末の紐付け
+
+
+class DeviceCheckResult(str, Enum):
+    OK = "ok"              # 未登録，または同じ利用者
+    CONFLICT = "conflict"  # 別の利用者に紐付いている
+
+
+def issue_device_id() -> str:
+    """新しい端末識別子を発行する.
+
+    HttpOnlyのCookieで配る前提．JavaScriptから読めない形にしておく．
+    推測されても他人になりすませるわけではないが，乱数にしておく．
+    """
+    return secrets.token_urlsafe(16)
+
+
+def check_device_binding(db, device_id: str | None, user_id: int) -> DeviceCheckResult:
+    """端末が別のアカウントに紐付いていないか調べる.
+
+    **見つけてもブロックしない**（decisions.md D-11）．`device_id` はCookieなので
+    削除やシークレットモードで簡単に回避できる．回避可能な仕組みをブロックの
+    根拠にすると，端末を買い替えた正当な利用者を弾く一方で，本気の攻撃者は
+    素通りする．検知して記録するところまでが用途．
+
+    衝突を見つけても**紐付けを書き換えない**．書き換えを許すと，あとから来た
+    アカウントが端末を「奪える」ことになり，記録として意味をなさなくなる．
+    """
+    from app import models
+
+    if not device_id:
+        return DeviceCheckResult.OK
+
+    now = _to_iso(_utcnow())
+    binding = db.get(models.DeviceBinding, device_id)
+
+    if binding is None:
+        db.add(models.DeviceBinding(
+            device_id=device_id,
+            user_id=user_id,
+            first_seen_at=now,
+            last_seen_at=now,
+        ))
+        return DeviceCheckResult.OK
+
+    if binding.user_id != user_id:
+        return DeviceCheckResult.CONFLICT
+
+    binding.last_seen_at = now
+    return DeviceCheckResult.OK
+
+
+# ==================================================== A-10. レート制限
+
+
+def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bool:
+    """ログイン試行を拒否すべきかを判定する.
+
+    判定のしかた：
+      直近の失敗を `LOGIN_WINDOW_MINUTES` 分の幅で数え，`LOGIN_MAX_FAILURES`
+      件以上あれば，**最後の失敗から `LOGIN_LOCKOUT_MINUTES` の間**は拒否する．
+
+    失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
+
+    `login_id` 別と `client_ip` 別の両方を見る．片方だけだと，
+      - `login_id` だけ … 1つのIPから多数のIDを総当たりされて素通り
+      - `client_ip` だけ … 分散したIPから1つのIDを狙われて素通り
+    のどちらかを取り逃す．
+    """
+    from app import models
+
+    settings = get_settings()
+    now = _utcnow()
+
+    # ロック解除の判定に必要な分だけ遡れば足りる
+    lookback = timedelta(
+        minutes=settings.login_window_minutes + settings.login_lockout_minutes
+    )
+    since = _to_iso(now - lookback)
+
+    def _locked_by(column, value) -> bool:
+        if not value:
+            return False
+
+        # 時刻はUTCの固定長ISO文字列なので，文字列の大小比較で時系列比較になる
+        times = [
+            row[0]
+            for row in db.query(models.AuditLog.occurred_at)
+            .filter(
+                models.AuditLog.action == "login",
+                models.AuditLog.result == "failure",
+                column == value,
+                models.AuditLog.occurred_at >= since,
+            )
+            .all()
+        ]
+        if not times:
+            return False
+
+        last_failure = max(_from_iso(t) for t in times)
+        if now - last_failure >= timedelta(minutes=settings.login_lockout_minutes):
+            return False  # ロック期間を過ぎている
+
+        # 最後の失敗から遡って window 分の失敗を数える
+        window_start = last_failure - timedelta(minutes=settings.login_window_minutes)
+        recent = [t for t in times if _from_iso(t) >= window_start]
+        return len(recent) >= settings.login_max_failures
+
+    return (
+        _locked_by(models.AuditLog.attempted_login_id, login_id)
+        or _locked_by(models.AuditLog.client_ip, client_ip)
+    )
+
+
+# ==================================================== A-11. バースト検知
+
+
+def detect_burst(
+    db,
+    attendance_session_id: int,
+    device_id: str | None = None,
+    client_ip: str | None = None,
+) -> bool:
+    """短時間に同じ端末（またはIP）から複数人の登録があったかを判定する.
+
+    数えるのは**登録件数ではなく，登録した人数（重複しない `user_id`）**．
+    1人が1回目と2回目を読むのは正常なので，件数で数えると誤検知になる．
+
+    `device_id` での判定が主で，`client_ip` は補助．
+    **外部にデプロイすると，学内Wi-Fiの学生は全員が大学のNATの出口IPで
+    届くため，IPでの判定はほぼ機能しない**（全員が同じIPになる）．
+    IPを見るのは，学内が複数の出口に分かれている場合や，ローカルでの
+    検証時に意味を持つ程度と考えておく．
+    """
+    from app import models
+
+    settings = get_settings()
+    since = _to_iso(_utcnow() - timedelta(seconds=settings.burst_window_seconds))
+
+    def _distinct_users(column, value) -> int:
+        if not value:
+            return 0
+        return (
+            db.query(models.AttendanceScan.user_id)
+            .filter(
+                models.AttendanceScan.attendance_session_id == attendance_session_id,
+                column == value,
+                models.AttendanceScan.scanned_at >= since,
+            )
+            .distinct()
+            .count()
+        )
+
+    threshold = settings.burst_threshold_count
+    return (
+        _distinct_users(models.AttendanceScan.device_id, device_id) >= threshold
+        or _distinct_users(models.AttendanceScan.client_ip, client_ip) >= threshold
+    )

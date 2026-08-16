@@ -191,32 +191,44 @@ class DeviceCheckResult(str, Enum):
     OK       = "ok"        # 未登録，または同一ユーザー
     CONFLICT = "conflict"  # 別のユーザーに紐付いている
 
-def check_device_binding(device_id: str, user_id: int) -> DeviceCheckResult: ...
+def check_device_binding(db, device_id: str | None,
+                         user_id: int) -> DeviceCheckResult: ...
 ```
 
 `CONFLICT` でも登録をブロックしない．`audit_logs` に `device_conflict` として記録し，教員のアラート画面に出す．
 
 `device_id` はHttpOnlyのCookieで配る．JavaScriptから読めない形にして，ページ側で書き換えられないようにする．
 
+衝突を見つけても**紐付けを書き換えない**．書き換えを許すと，あとから来たアカウントが端末を「奪える」ことになり，記録として意味をなさなくなる．
+
 限界として，Cookieを削除すれば新しい端末として扱われるし，シークレットモードでも回避できる．だからブロックの根拠にはしない．
 
 ### レート制限
 
 ```python
-def is_login_rate_limited(login_id: str, client_ip: str) -> bool: ...
+def is_login_rate_limited(db, login_id: str | None,
+                          client_ip: str | None) -> bool: ...
 ```
 
 `audit_logs` の `action='login'` かつ `result='failure'` を，`login_id` 別と `client_ip` 別の両方で数える．
 
 両方見るのは，`login_id` だけだと1つのIPから多数のIDを総当たりされ，`client_ip` だけだと分散したIPから1つのIDを狙われるため．
 
+判定のしかた：直近の失敗を `LOGIN_WINDOW_MINUTES` 分の幅で数え，`LOGIN_MAX_FAILURES` 件以上あれば，**最後の失敗から `LOGIN_LOCKOUT_MINUTES` の間**は拒否する．失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
+
 ### 異常検知
 
 ```python
-def detect_burst(attendance_session_id: int, client_ip: str) -> bool: ...
+def detect_burst(db, attendance_session_id: int,
+                 device_id: str | None = None,
+                 client_ip: str | None = None) -> bool: ...
 ```
 
-同一IPから短時間に閾値を超える登録があったかを判定する．
+短時間に同じ端末（またはIP）から複数人の登録があったかを判定する．
+
+数えるのは**登録件数ではなく，登録した人数（重複しない `user_id`）**．1人が1回目と2回目を読むのは正常なので，件数で数えると誤検知になる．
+
+`device_id` での判定が主で，`client_ip` は補助．**外部にデプロイすると学内Wi-Fiの学生は全員が大学のNATの出口IPで届くため，IPでの判定はほぼ機能しない**（全員が同じIPになる）．学内が複数の出口に分かれている場合や，ローカルでの検証時に意味を持つ程度と考えておく．
 
 ### 監査ログ
 
