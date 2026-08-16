@@ -19,7 +19,7 @@ import hashlib
 import hmac
 import ipaddress
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 
 import bcrypt
@@ -252,3 +252,195 @@ def classify_attendance(
     if elapsed_seconds <= settings.late_until_minutes * 60:
         return AttendanceStatus.LATE
     return None
+
+
+# ==================================================== ここから下はDBを使う
+#
+# `app.models`（B-1）に依存する．models.py が未完成の間も上の A-1〜A-5 を
+# 壊さないよう，import は関数の中で行っている（models.py が揃ったら
+# トップレベルの import に戻してよい）．
+#
+# DBセッションは呼び出し側から引数で受け取る．security.py 側でセッションを
+# 作らないことで，テスト時に使い捨てのDBを渡せる状態を保つ．
+
+
+def _sha256_hex(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _to_iso(dt: datetime) -> str:
+    """DBに入れる形式（UTCのISO 8601）に変換する."""
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _from_iso(value: str) -> datetime:
+    """DBから読んだISO 8601文字列をawareなdatetimeにする."""
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+# ============================================== A-6. ログインセッション
+
+# セッションIDの長さ（バイト）．推測は現実的でない．
+SESSION_ID_BYTES = 32
+
+
+def create_login_session(
+    db,
+    user_id: int,
+    client_ip: str | None = None,
+    user_agent: str | None = None,
+) -> str:
+    """新しいログインセッションを作り，Cookieに入れる生のIDを返す.
+
+    **生のIDはこの戻り値でしか手に入らない**．DBにはSHA-256ハッシュしか
+    保存しないので，後から取り出すことはできない（パスワードと同じ考え方）．
+    こうしておくとDBが漏れてもセッションを乗っ取られない．
+    """
+    from app import models
+
+    raw_id = secrets.token_urlsafe(SESSION_ID_BYTES)
+    now = _utcnow()
+    lifetime = timedelta(hours=get_settings().session_lifetime_hours)
+
+    db.add(
+        models.LoginSession(
+            id_hash=_sha256_hex(raw_id),
+            user_id=user_id,
+            created_at=_to_iso(now),
+            last_used_at=_to_iso(now),
+            expires_at=_to_iso(now + lifetime),
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+    )
+    db.flush()
+    return raw_id
+
+
+def get_session_user(db, session_id: str | None):
+    """セッションIDから利用者を引く．無効・期限切れ・失効済みならNone."""
+    from app import models
+
+    if not session_id:
+        return None
+
+    row = db.get(models.LoginSession, _sha256_hex(session_id))
+    if row is None:
+        return None
+    if row.revoked_at is not None:
+        return None
+    if _from_iso(row.expires_at) <= _utcnow():
+        return None
+
+    row.last_used_at = _to_iso(_utcnow())
+    return db.get(models.User, row.user_id)
+
+
+def revoke_login_session(db, session_id: str | None) -> None:
+    """セッションを1つ失効させる（ログアウト）."""
+    from app import models
+
+    if not session_id:
+        return
+
+    row = db.get(models.LoginSession, _sha256_hex(session_id))
+    if row is not None and row.revoked_at is None:
+        row.revoked_at = _to_iso(_utcnow())
+
+
+def revoke_all_sessions_for_user(db, user_id: int) -> int:
+    """そのユーザーの有効なセッションをすべて失効させる．失効させた件数を返す.
+
+    教員アカウントの乗っ取りに気付いたときの緊急停止用．
+    この操作ができることが，署名付きCookie（JWT等）ではなくサーバー側
+    セッションを選んだ理由（decisions.md D-7）．
+    """
+    from app import models
+
+    now = _to_iso(_utcnow())
+    rows = (
+        db.query(models.LoginSession)
+        .filter(
+            models.LoginSession.user_id == user_id,
+            models.LoginSession.revoked_at.is_(None),
+        )
+        .all()
+    )
+    for row in rows:
+        row.revoked_at = now
+    return len(rows)
+
+
+# ==================================================== A-8. 監査ログ
+
+
+def _reject_secrets_in_detail(detail: str | None) -> None:
+    """秘密鍵がログに紛れ込んでいないか確認する.
+
+    「トークンやパスワードをログに入れない」は運用の約束事だが，
+    約束事だけだと事故は起きる．最低限，秘密鍵の混入は機械的に弾く．
+    """
+    if not detail:
+        return
+    if get_settings().token_secret in detail:
+        raise ValueError("監査ログのdetailに秘密鍵を含めてはいけません")
+
+
+def write_audit_log(
+    db,
+    action: str,
+    result: str,
+    actor_user_id: int | None = None,
+    attempted_login_id: str | None = None,
+    target_type: str | None = None,
+    target_id: int | None = None,
+    client_ip: str | None = None,
+    device_id: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """監査ログを1件，**呼び出し側のトランザクションに**書く.
+
+    手動修正のように「記録と本体の変更が必ずセットで残る／両方消える」必要が
+    ある場面ではこちらを使う．
+
+    逆に，このあと例外を投げてロールバックする経路（ログイン失敗，出席登録の
+    拒否など）でこれを使うと，**ログごと消える**．その場合は
+    `write_audit_log_now` を使うこと．
+    """
+    from app import models
+
+    if result not in ("success", "failure"):
+        raise ValueError("result は 'success' か 'failure' にしてください")
+    _reject_secrets_in_detail(detail)
+
+    db.add(
+        models.AuditLog(
+            occurred_at=_to_iso(_utcnow()),
+            action=action,
+            result=result,
+            actor_user_id=actor_user_id,
+            attempted_login_id=attempted_login_id,
+            target_type=target_type,
+            target_id=target_id,
+            client_ip=client_ip,
+            device_id=device_id,
+            detail=detail,
+        )
+    )
+
+
+def write_audit_log_now(session_factory, **kwargs) -> None:
+    """監査ログを**独立したトランザクションで**書いて即コミットする.
+
+    失敗を記録してから例外を投げる経路で使う．呼び出し側のトランザクションが
+    ロールバックされても，この記録は残る．
+
+    拒否された試行こそ後から追いたい情報なので，ここを取りこぼさないように
+    経路を分けている（⑥追跡可能性）．
+    """
+    with session_factory() as audit_db:
+        write_audit_log(audit_db, **kwargs)
+        audit_db.commit()

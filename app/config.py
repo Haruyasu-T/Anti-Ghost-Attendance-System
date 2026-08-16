@@ -76,6 +76,12 @@ class Settings:
     token_secret: str
     campus_ip_ranges: tuple
 
+    # --- DB ---
+    database_url: str
+
+    # --- ログインセッション ---
+    session_lifetime_hours: int
+
     # --- 動的QR ---
     qr_rotate_seconds: int
     token_accept_previous_windows: int
@@ -111,6 +117,8 @@ def get_settings() -> Settings:
     settings = Settings(
         token_secret=_require_str("TOKEN_SECRET"),
         campus_ip_ranges=_parse_cidrs(_require_str("CAMPUS_IP_RANGES")),
+        database_url=os.getenv("DATABASE_URL", "").strip() or "sqlite:///./attendance.db",
+        session_lifetime_hours=_int_or_default("SESSION_LIFETIME_HOURS", 12),
         qr_rotate_seconds=_int_or_default("QR_ROTATE_SECONDS", 5),
         token_accept_previous_windows=_int_or_default("TOKEN_ACCEPT_PREVIOUS_WINDOWS", 1),
         present_before_minutes=_int_or_default("PRESENT_BEFORE_MINUTES", 5),
@@ -130,6 +138,8 @@ def get_settings() -> Settings:
         raise ConfigError("TOKEN_ACCEPT_PREVIOUS_WINDOWS は0以上にしてください。")
     if settings.trusted_proxy_count < 0:
         raise ConfigError("TRUSTED_PROXY_COUNT は0以上にしてください。")
+    if settings.session_lifetime_hours <= 0:
+        raise ConfigError("SESSION_LIFETIME_HOURS は1以上にしてください。")
     if not (settings.present_after_minutes <= settings.late_until_minutes):
         raise ConfigError(
             "LATE_UNTIL_MINUTES は PRESENT_AFTER_MINUTES 以上にしてください。"
