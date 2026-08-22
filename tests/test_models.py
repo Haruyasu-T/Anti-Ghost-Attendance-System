@@ -47,6 +47,14 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _require_columns(model, *columns):
+    """モデルに必要なカラムが揃っているか確認する."""
+    missing = [c for c in columns if not hasattr(model, c)]
+    assert not missing, (
+        f"{model.__name__} に必要なカラムがありません: {', '.join(missing)}"
+    )
+
+
 # 時刻カラムは db-design.md の通り「UTCのISO 8601文字列」を前提にしている．
 # B が SQLAlchemy の DateTime 型でモデリングした場合は，ここを datetime に変える．
 NOW = "2026-07-27T01:00:00Z"
@@ -267,6 +275,98 @@ def test_duplicate_enrollment_is_rejected(session, fixture_data):
 
 
 # -------------------------------------------- ログインセッション
+
+def test_all_designed_tables_exist():
+    """設計にあるテーブルが揃っていること.
+
+    これらが無いと以下が実装できない：
+      audit_logs         … 監査ログ・レート制限・バースト検知（A-8/A-10/A-11）
+      device_bindings    … 端末の紐付け検知（A-9，アカウント貸与への対策）
+      manual_corrections … 手動修正の監査（B-7．要件上の必須項目）
+    """
+    for name in ("AuditLog", "DeviceBinding", "ManualCorrection"):
+        assert hasattr(models, name), (
+            f"{name} が定義されていません（docs/db-design.md 参照）"
+        )
+
+
+def test_attendance_scan_records_the_device(session, fixture_data):
+    """読み取りに device_id を残せること.
+
+    これが無いと「同じ端末で複数アカウント」を検知できず、
+    アカウント貸与への対策が成立しない。
+    """
+    _require_columns(models.AttendanceScan, "device_id")
+
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at=NOW,
+        client_ip="192.168.1.10",
+        device_id="device-abc",
+    ))
+
+    session.flush()
+
+
+def test_attendance_scan_requires_client_ip(session, fixture_data):
+    """client_ip が NOT NULL であること.
+
+    IPが空のレコードができると、バースト検知も事後追跡もできなくなる。
+    """
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at=NOW,
+        # client_ip を渡さない
+    ))
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_login_session_can_be_revoked(session, fixture_data):
+    """login_sessions に revoked_at があること.
+
+    これが無いとセッションを失効させられず、サーバー側セッションを選んだ
+    理由（教員アカウント乗っ取りへの対応）が失われる（decisions.md D-7）。
+    """
+    _require_columns(models.LoginSession,
+                     "revoked_at", "created_at", "client_ip", "user_agent")
+
+
+def test_attendance_session_records_close_time(session, fixture_data):
+    """attendance_sessions に closed_at があること."""
+    _require_columns(models.AttendanceSession, "closed_at")
+
+
+def test_timestamp_default_matches_the_application_format(session):
+    """server_default が入れる時刻の形式が、アプリが入れる形式と揃っていること.
+
+    レート制限は audit_logs を「直近N分の失敗回数」で数えるが、時刻は文字列
+    比較で範囲を絞っている（UTCの固定長ISO文字列なら文字列比較＝時系列比較
+    になるため）。
+
+    ところが SQLite の datetime('now') は "2026-08-16 15:33:18" を返し、
+    アプリ側は "2026-08-16T15:33:18Z" を入れる。空白(0x20)は'T'(0x54)より
+    小さいので、**空白区切りの行は常に古いものとして扱われ、範囲検索から
+    漏れる**。つまり失敗が数え落とされ、レート制限をすり抜けられる。
+
+    修正案（models.py 側）：
+        server_default=text("(strftime('%Y-%m-%dT%H:%M:%SZ','now'))")
+    """
+    session.add(models.AuditLog(action="login", result="failure"))
+    session.flush()
+
+    stored = session.query(models.AuditLog).one().occurred_at
+
+    assert "T" in stored and stored.endswith("Z"), (
+        f"server_default が {stored!r} を入れている。"
+        "アプリ側の '2026-08-16T15:33:18Z' と形式を揃えること"
+    )
+
 
 def test_login_session_is_keyed_by_hash(session, fixture_data):
     """login_sessions の主キーが id_hash であること.
