@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light">
+    <title>{% block title %}出席管理システム{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+    <a class="skip-link" href="#main-content">本文へ移動</a>
+    {% block header %}
+    <header class="site-header">
+        <a class="brand" href="/">出席管理</a>
+        {% block header_actions %}{% endblock %}
+    </header>
+    {% endblock %}
+    <main id="main-content" class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <div id="live-region" class="sr-only" aria-live="polite"></div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

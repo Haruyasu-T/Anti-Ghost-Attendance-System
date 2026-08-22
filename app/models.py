@@ -47,18 +47,25 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
-# UTC ISO 8601（"YYYY-MM-DDTHH:MM:SS[.ffffff]Z"）の大まかな書式チェック用 SQL 断片．
-# GLOB を使い，先頭10桁の日付・区切りの'T'・末尾'Z'のみを検証する（厳密な妥当性
-# 検証はアプリ層に委ね，DB 層は明らかな書式違反のみを弾く「最後の防壁」とする）．
+# UTC ISO 8601（"YYYY-MM-DDTHH:MM:SS.mmmZ"）の書式チェック用 SQL 断片．
+#
+# **桁数まで固定する**のが重要．時刻の範囲検索は文字列の大小比較で行うため
+# （固定長のUTC文字列なら文字列比較＝時系列比較になる），桁数が揺れると比較が
+# 壊れる．たとえば同じ瞬間を "…:00Z" と "…:00.000Z" で表すと，'.'(0x2E) は
+# 'Z'(0x5A) より小さいので後者が常に「古い」と判定される．その結果，
+# レート制限が失敗を数え落とし，総当たりがすり抜ける．
+#
+# ミリ秒3桁に統一する理由：授業開始直後は多数の登録が同じ秒に集中するため，
+# 秒までだと監査ログの順序が潰れる．SQLite の strftime('%f') と揃えられる．
 _ISO8601_UTC_GLOB = (
     "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
-    "T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*Z"
+    "T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z"
 )
 
 
 def _iso8601_utc_check(column_name: str, constraint_name: str,
                        nullable: bool = False) -> CheckConstraint:
-    """指定カラムに UTC ISO 8601 の大まかな書式チェックを付与する CheckConstraint を返す．"""
+    """指定カラムに UTC ISO 8601（ミリ秒・固定長）の書式チェックを付与する．"""
     condition = f"{column_name} GLOB '{_ISO8601_UTC_GLOB}'"
     if nullable:
         condition = f"({column_name} IS NULL OR {condition})"
