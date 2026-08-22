@@ -4,9 +4,11 @@
 
 ## ブランチ
 
+**`main` 1本で運用する．** `develop` のような中間ブランチは置かない（3人・数週間の規模で挟む利点が薄く，どこにPRを出すか迷う原因になるため．一時期 `develop` があったが廃止した）．
+
 `main` は常に動く状態を保つ．直接コミットしない．
 
-作業ブランチは `main` から都度切って，マージされたら削除する．
+作業ブランチは `main` から都度切って，マージされたら削除する．**マージ済みのブランチは残さない**（どれが生きているか分からなくなる）．
 
 名前の付け方：
 
@@ -45,12 +47,14 @@ GitHubでPull Requestを作る．タイトルは変更内容が分かるよう�
 
 ## mainの保護設定
 
-GitHubの Settings → Branches で `main` に対して設定してある．
+**現状，保護は効いていない．** GitHub Free の個人アカウント＋Privateリポジトリでは，Branch protection も Rulesets も使えないため（Rulesets は Team 以上，classic の Branch protection は Pro 以上）．
 
-- Require a pull request before merging
-- Require approvals（1件以上）
+したがって以下は**全員が意識して守る運用ルール**であって，仕組みで強制されていない．
 
-テストが揃ったら「Require status checks to pass before merging」も有効にする（フェーズ1の時点ではCIが無く設定できなかった）．
+- `main` に直接pushしない
+- 作者以外の1人以上がApproveしてからマージする
+
+publicにすれば無料で保護が使えるようになるので，公開のタイミング（フェーズ5）で設定する．そのときに「Require status checks to pass before merging」も有効にする（CIは `.github/workflows/test.yml` で動いている）．
 
 ## コンフリクトを避けるために
 
