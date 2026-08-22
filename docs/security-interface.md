@@ -262,6 +262,100 @@ def write_audit_log_now(session_factory, **kwargs) -> None: ...
 - 手動修正は `manual_corrections` への記録と同じトランザクションで行い，ログの書き込みが失敗したら修正をロールバックする
 - `detail` にパスワードとトークンを入れない．秘密鍵の混入は実装側でも弾いているが，約束事として守ること
 
+## app/auth.py — 認可の依存関数
+
+`security.py` をHTTPから切り離しておきたいので，FastAPIの `Request` や `HTTPException` を扱う部分は `app/auth.py` に分けている．
+
+```python
+from app.auth import require_login, require_role, require_course_owner, require_session_owner
+
+require_login          # ログイン必須．未ログインなら401
+require_role(*roles)   # ロール確認．require_role("teacher") のように呼んで使う
+require_course_owner   # パスの course_id が自分の担当授業か確認
+require_session_owner  # パスの attendance_session_id が自分の担当授業か確認
+```
+
+`require_role` だけが「依存関数を作る関数」なので括弧付きで呼ぶ．残りはそのまま `Depends(...)` に渡す．`get_current_user` は `require_login` の別名（FastAPIでよく使われる名前なので用意してあるだけで，実体は同じ）．
+
+他の教員のリソースを指定された場合は403ではなく**404**を返す．403だと「そのIDは存在する」と分かってしまうため．
+
+## app/db.py — DBセッション
+
+```python
+from app.db import get_db          # FastAPIの依存関数．1リクエスト1トランザクション
+from app.db import get_session_factory   # 独立したトランザクションが要るとき
+```
+
+`get_db` は正常終了でコミット，例外でロールバックする．
+
+**失敗を記録してから例外を投げる経路では，このセッションに監査ログを書かないこと．** ロールバックで一緒に消える．`write_audit_log_now(get_session_factory(), ...)` を使う．
+
+## B-3（認証API）での呼び出し例
+
+自前でセッションを作らず，以下を呼ぶこと．ハッシュ化・有効期限・失効の扱いはすべて `security.py` 側に入っている．
+
+```python
+from app import security
+from app.auth import SESSION_COOKIE, require_login
+from app.db import get_db, get_session_factory
+
+@app.post("/auth/login")
+def login(payload: LoginRequest, request: Request, response: Response,
+          db: Session = Depends(get_db)):
+    client_ip = security.get_client_ip(request)   # request.client.host を直接使わない
+
+    if security.is_login_rate_limited(db, payload.login_id, client_ip):
+        raise HTTPException(429, "しばらく待ってから再度お試しください")
+
+    user = db.query(models.User).filter_by(login_id=payload.login_id).one_or_none()
+    if not security.verify_password(payload.password,
+                                    user.password_hash if user else None):
+        # 例外でロールバックするので _now の方を使う
+        security.write_audit_log_now(
+            get_session_factory(), action="login", result="failure",
+            attempted_login_id=payload.login_id, client_ip=client_ip,
+        )
+        raise HTTPException(401, "IDまたはパスワードが違います")
+
+    raw_session_id = security.create_login_session(
+        db, user.id, client_ip=client_ip,
+        user_agent=request.headers.get("user-agent"),
+    )
+    security.write_audit_log(db, action="login", result="success",
+                             actor_user_id=user.id, client_ip=client_ip)
+
+    response.set_cookie(SESSION_COOKIE, raw_session_id,
+                        httponly=True, secure=True, samesite="lax")
+    return {"status": "ok"}
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response,
+           user = Depends(require_login), db: Session = Depends(get_db)):
+    security.revoke_login_session(db, request.cookies.get(SESSION_COOKIE))
+    security.write_audit_log(db, action="logout", result="success",
+                             actor_user_id=user.id,
+                             client_ip=security.get_client_ip(request))
+    response.delete_cookie(SESSION_COOKIE)
+    return {"status": "ok"}
+
+
+@app.get("/auth/me")
+def me(user = Depends(require_login)):
+    return {"login_id": user.login_id, "role": user.role,
+            "display_name": user.display_name}
+```
+
+## 時刻の書式
+
+DBに入れる時刻は **"YYYY-MM-DDTHH:MM:SS.mmmZ"（ミリ秒3桁・24文字固定）** に統一する．
+
+範囲検索を文字列の大小比較で行っているため，**桁数が揺れると比較が壊れる**．同じ瞬間を `…:00Z` と `…:00.000Z` で表すと，`.`(0x2E) は `Z`(0x5A) より小さいので後者が常に「古い」と判定される．レート制限が失敗を数え落とし，総当たりがすり抜ける．
+
+- Python側：`security._to_iso(dt)` を使う．自分で `strftime` しない
+- DB側：`server_default` は `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+- `models.py` の CHECK 制約が桁数まで強制しているので，違う書式は書き込み時に落ちる
+
 ## main.py 側から見た呼び出し（出席登録）
 
 [API設計](api-design.md)の検証順序に対応する擬似コード．担当Bはこの形で実装する．

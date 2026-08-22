@@ -57,7 +57,7 @@ def _require_columns(model, *columns):
 
 # 時刻カラムは db-design.md の通り「UTCのISO 8601文字列」を前提にしている．
 # B が SQLAlchemy の DateTime 型でモデリングした場合は，ここを datetime に変える．
-NOW = "2026-07-27T01:00:00Z"
+NOW = "2026-07-27T01:00:00.000Z"
 
 
 # ---------------------------------------------------------------- fixtures
@@ -343,29 +343,50 @@ def test_attendance_session_records_close_time(session, fixture_data):
 
 
 def test_timestamp_default_matches_the_application_format(session):
-    """server_default が入れる時刻の形式が、アプリが入れる形式と揃っていること.
+    """DBが自動で入れる時刻と、アプリが入れる時刻の書式が一致すること.
 
-    レート制限は audit_logs を「直近N分の失敗回数」で数えるが、時刻は文字列
-    比較で範囲を絞っている（UTCの固定長ISO文字列なら文字列比較＝時系列比較
-    になるため）。
+    時刻の範囲検索は文字列の大小比較で行っている（固定長のUTC文字列なら
+    文字列比較＝時系列比較になるため）。桁数が揺れるとこれが壊れる。
 
-    ところが SQLite の datetime('now') は "2026-08-16 15:33:18" を返し、
-    アプリ側は "2026-08-16T15:33:18Z" を入れる。空白(0x20)は'T'(0x54)より
-    小さいので、**空白区切りの行は常に古いものとして扱われ、範囲検索から
-    漏れる**。つまり失敗が数え落とされ、レート制限をすり抜けられる。
+    同じ瞬間を "…:00Z" と "…:00.000Z" で表すと、'.'(0x2E) は 'Z'(0x5A) より
+    小さいので後者が常に「古い」と判定される。レート制限は audit_logs を
+    この比較で絞っているので、失敗が数え落とされて総当たりがすり抜ける。
 
-    修正案（models.py 側）：
-        server_default=text("(strftime('%Y-%m-%dT%H:%M:%SZ','now'))")
+    そのため「両方がISO 8601であること」では不十分で、**桁数まで一致**して
+    いる必要がある。
     """
+    import re
+
+    from app import security
+
     session.add(models.AuditLog(action="login", result="failure"))
     session.flush()
 
-    stored = session.query(models.AuditLog).one().occurred_at
+    from_db = session.query(models.AuditLog).one().occurred_at
+    from_app = security._to_iso(security._utcnow())
 
-    assert "T" in stored and stored.endswith("Z"), (
-        f"server_default が {stored!r} を入れている。"
-        "アプリ側の '2026-08-16T15:33:18Z' と形式を揃えること"
-    )
+    pattern = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"
+    assert re.fullmatch(pattern, from_db), f"DB側の書式が想定外: {from_db!r}"
+    assert re.fullmatch(pattern, from_app), f"アプリ側の書式が想定外: {from_app!r}"
+    assert len(from_db) == len(from_app)
+
+
+def test_timestamp_check_constraint_rejects_wrong_format(session, fixture_data):
+    """書式の違う時刻をDBが拒否すること（最後の防壁）.
+
+    アプリ側で書式を揃えるのが本筋だが、誰かが別の書式で書き込もうとしたら
+    静かに壊れるのではなく、その場で失敗してほしい。
+    """
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at="2026-07-27 01:00:00",   # 'T' も 'Z' もミリ秒もない
+        client_ip="192.168.1.10",
+    ))
+
+    with pytest.raises(IntegrityError):
+        session.flush()
 
 
 def test_login_session_is_keyed_by_hash(session, fixture_data):
@@ -383,7 +404,7 @@ def test_login_session_is_keyed_by_hash(session, fixture_data):
         id_hash="a" * 64,
         user_id=fixture_data["student"].id,
         last_used_at=NOW,
-        expires_at="2026-07-28T01:00:00Z",
+        expires_at="2026-07-28T01:00:00.000Z",
     ))
 
     session.flush()  # 例外が出なければ成功

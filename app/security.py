@@ -269,8 +269,20 @@ def _sha256_hex(value: str) -> str:
 
 
 def _to_iso(dt: datetime) -> str:
-    """DBに入れる形式（UTCのISO 8601）に変換する."""
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    """DBに入れる形式（UTCのISO 8601・ミリ秒3桁の固定長）に変換する.
+
+    "2026-08-22T10:00:00.123Z" のように**必ず24文字**になる．
+
+    桁数を固定するのは，時刻の範囲検索を文字列の大小比較で行っているため．
+    固定長のUTC文字列なら文字列比較がそのまま時系列比較になるが，桁数が
+    揺れると壊れる．同じ瞬間を "…:00Z" と "…:00.000Z" で表すと，'.'(0x2E)は
+    'Z'(0x5A)より小さいので後者が常に「古い」と判定され，レート制限が
+    失敗を数え落とす．
+
+    `models.py` の CHECK 制約もこの書式を強制している．
+    """
+    dt = dt.astimezone(timezone.utc)
+    return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{dt.microsecond // 1000:03d}Z"
 
 
 def _from_iso(value: str) -> datetime:

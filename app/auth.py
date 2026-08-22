@@ -27,7 +27,7 @@ SESSION_COOKIE = "session"
 DEVICE_COOKIE = "device_id"
 
 
-def get_current_user(request: Request, db: Session = Depends(get_db)):
+def require_login(request: Request, db: Session = Depends(get_db)):
     """ログイン中の利用者を返す．未ログインなら401.
 
     誰であるかは**Cookieのセッションからだけ**決める．リクエストに含まれる
@@ -40,6 +40,11 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
     return user
 
 
+# FastAPI では `get_current_user` という名前が一般的なので，別名も用意しておく．
+# 実体は同じ．`Depends(require_login)` のように，呼び出さずに渡すこと．
+get_current_user = require_login
+
+
 def require_role(*allowed_roles: str):
     """指定したロールだけを通す依存関数を作る.
 
@@ -48,7 +53,7 @@ def require_role(*allowed_roles: str):
     if not allowed_roles:
         raise ValueError("ロールを1つ以上指定してください")
 
-    def dependency(user=Depends(get_current_user)):
+    def dependency(user=Depends(require_login)):
         if user.role not in allowed_roles:
             raise HTTPException(status_code=403, detail="権限がありません")
         return user

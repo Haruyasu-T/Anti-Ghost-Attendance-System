@@ -9,9 +9,20 @@
     で表現する（⑤安全なデフォルト）．
 - SQLite は接続ごとに `PRAGMA foreign_keys = ON` を発行しないと外部キー制約が
     無効化されたままになるため，`create_db_engine()` で接続時に必ず有効化する．
-- 時刻カラムは UTC の ISO 8601 文字列（例: "2026-07-27T01:00:00Z"）として
+- 時刻カラムは UTC の ISO 8601 文字列（例: "2026-07-27T01:00:00.000Z"）として
     保存する．タイムゾーン変換や比較演算はアプリ層の責務とし，DB 層では文字列
     として素直に保持する．
+    - DB 側で自動付与するタイムスタンプ（created_at 等）も同じ書式に揃えるため，
+      `server_default` には SQLite の `datetime('now')` ではなく
+      `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` を用いる
+      （`datetime('now')` は "YYYY-MM-DD HH:MM:SS" 形式で ISO 8601 の `T`/`Z` を
+      含まないため）．
+    - アプリ層でも時刻文字列を生成する際は `Z` サフィックス付きの UTC 表現
+      （例: `datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")` や
+      `isoformat()` を "+00:00" → "Z" に置換したもの）に統一すること．
+    - 最後の防壁として，DB レベルでも大まかな書式チェック（先頭が
+      `YYYY-MM-DDTHH:MM` で末尾が `Z`）を CHECK 制約で強制する．完全な
+      ISO 8601 バリデーションではないが，明らかに書式が異なる値の混入は防げる．
 - ログインセッションは生のセッションIDを保存せず，SHA-256 等でハッシュ化した
     `id_hash` のみを主キーとして保存する（漏洩時の被害を限定するため）．
 """
@@ -34,6 +45,36 @@ from sqlalchemy.sql import text
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
+
+
+# UTC ISO 8601（"YYYY-MM-DDTHH:MM:SS.mmmZ"）の書式チェック用 SQL 断片．
+#
+# **桁数まで固定する**のが重要．時刻の範囲検索は文字列の大小比較で行うため
+# （固定長のUTC文字列なら文字列比較＝時系列比較になる），桁数が揺れると比較が
+# 壊れる．たとえば同じ瞬間を "…:00Z" と "…:00.000Z" で表すと，'.'(0x2E) は
+# 'Z'(0x5A) より小さいので後者が常に「古い」と判定される．その結果，
+# レート制限が失敗を数え落とし，総当たりがすり抜ける．
+#
+# ミリ秒3桁に統一する理由：授業開始直後は多数の登録が同じ秒に集中するため，
+# 秒までだと監査ログの順序が潰れる．SQLite の strftime('%f') と揃えられる．
+_ISO8601_UTC_GLOB = (
+    "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]"
+    "T[0-9][0-9]:[0-9][0-9]:[0-9][0-9].[0-9][0-9][0-9]Z"
+)
+
+
+def _iso8601_utc_check(column_name: str, constraint_name: str,
+                       nullable: bool = False) -> CheckConstraint:
+    """指定カラムに UTC ISO 8601（ミリ秒・固定長）の書式チェックを付与する．"""
+    condition = f"{column_name} GLOB '{_ISO8601_UTC_GLOB}'"
+    if nullable:
+        condition = f"({column_name} IS NULL OR {condition})"
+    return CheckConstraint(condition, name=constraint_name)
+
+
+# SQLite の datetime('now') は "YYYY-MM-DD HH:MM:SS" 形式で UTC の 'T'/'Z' 表記を
+# 持たないため，ISO 8601 UTC 表現（ミリ秒 + 'Z'）を生成する式に置き換える．
+_UTC_NOW_ISO8601 = text("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
 
 
 def create_db_engine(url: str, **kwargs) -> Engine:
@@ -67,11 +108,12 @@ class User(Base):
     display_name = Column(String, nullable=False)
     password_hash = Column(String, nullable=False)
     created_at = Column(String, nullable=False,
-                        server_default=text("(datetime('now'))"))
+                        server_default=_UTC_NOW_ISO8601)
 
     __table_args__ = (
         CheckConstraint("role IN ('student', 'teacher')",
                         name="ck_users_role"),
+        _iso8601_utc_check("created_at", "ck_users_created_at_iso8601"),
     )
 
 
@@ -84,7 +126,11 @@ class Course(Base):
     name = Column(String, nullable=False)
     teacher_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(String, nullable=False,
-                        server_default=text("(datetime('now'))"))
+                        server_default=_UTC_NOW_ISO8601)
+
+    __table_args__ = (
+        _iso8601_utc_check("created_at", "ck_courses_created_at_iso8601"),
+    )
 
 
 # ---------------------------------------------------------- Enrollment
@@ -117,6 +163,15 @@ class AttendanceSession(Base):
             "status IN ('open', 'closed')",
             name="ck_attendance_sessions_status",
         ),
+        _iso8601_utc_check(
+            "scheduled_start_at", "ck_attendance_sessions_scheduled_start_at_iso8601"
+        ),
+        _iso8601_utc_check(
+            "started_at", "ck_attendance_sessions_started_at_iso8601"
+        ),
+        _iso8601_utc_check(
+            "closed_at", "ck_attendance_sessions_closed_at_iso8601", nullable=True
+        ),
     )
 
 
@@ -147,6 +202,9 @@ class Attendance(Base):
         CheckConstraint(
             "record_source IN ('auto', 'manual')",
             name="ck_attendances_record_source",
+        ),
+        _iso8601_utc_check(
+            "first_recorded_at", "ck_attendances_first_recorded_at_iso8601"
         ),
     )
 
@@ -179,6 +237,8 @@ class AttendanceScan(Base):
             "scan_seq",
             name="uq_attendance_scans_session_user_seq",
         ),
+        _iso8601_utc_check(
+            "scanned_at", "ck_attendance_scans_scanned_at_iso8601"),
     )
 
 
@@ -198,13 +258,22 @@ class LoginSession(Base):
     last_used_at = Column(String, nullable=False)
     expires_at = Column(String, nullable=False)
     created_at = Column(String, nullable=False,
-                        server_default=text("(datetime('now'))"))
+                        server_default=_UTC_NOW_ISO8601)
     revoked_at = Column(String)
     client_ip = Column(String)
     user_agent = Column(String)
 
     __table_args__ = (
         Index("idx_login_sessions_user", "user_id"),
+        _iso8601_utc_check(
+            "last_used_at", "ck_login_sessions_last_used_at_iso8601"),
+        _iso8601_utc_check(
+            "expires_at", "ck_login_sessions_expires_at_iso8601"),
+        _iso8601_utc_check(
+            "created_at", "ck_login_sessions_created_at_iso8601"),
+        _iso8601_utc_check(
+            "revoked_at", "ck_login_sessions_revoked_at_iso8601", nullable=True
+        ),
     )
 
 
@@ -223,7 +292,13 @@ class ManualCorrection(Base):
     reason = Column(String, nullable=False)
     client_ip = Column(String)
     corrected_at = Column(String, nullable=False,
-                          server_default=text("(datetime('now'))"))
+                          server_default=_UTC_NOW_ISO8601)
+
+    __table_args__ = (
+        _iso8601_utc_check(
+            "corrected_at", "ck_manual_corrections_corrected_at_iso8601"
+        ),
+    )
 
 
 class DeviceBinding(Base):
@@ -236,6 +311,15 @@ class DeviceBinding(Base):
     first_seen_at = Column(String, nullable=False)
     last_seen_at = Column(String, nullable=False)
 
+    __table_args__ = (
+        _iso8601_utc_check(
+            "first_seen_at", "ck_device_bindings_first_seen_at_iso8601"
+        ),
+        _iso8601_utc_check(
+            "last_seen_at", "ck_device_bindings_last_seen_at_iso8601"
+        ),
+    )
+
 
 class AuditLog(Base):
     """行動を記録する"""
@@ -244,7 +328,7 @@ class AuditLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     occurred_at = Column(String, nullable=False,
-                         server_default=text("(datetime('now'))"))
+                         server_default=_UTC_NOW_ISO8601)
     action = Column(String, nullable=False)
     result = Column(String, nullable=False)
     actor_user_id = Column(Integer, ForeignKey("users.id"))
@@ -263,4 +347,5 @@ class AuditLog(Base):
         Index("idx_audit_logs_action_time", "action", "occurred_at"),
         Index("idx_audit_logs_ip_time", "client_ip", "occurred_at"),
         Index("idx_audit_logs_login_time", "attempted_login_id", "occurred_at"),
+        _iso8601_utc_check("occurred_at", "ck_audit_logs_occurred_at_iso8601"),
     )
