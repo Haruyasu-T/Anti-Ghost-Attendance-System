@@ -25,11 +25,11 @@ pytestmark = pytest.mark.skipif(
     reason="models.py が未完成のためスキップ: " + ", ".join(_MISSING),
 )
 
-NOW_ISO = "2026-07-27T01:00:00Z"
+NOW_ISO = "2026-07-27T01:00:00.000Z"
 
 
 def _iso(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return security._to_iso(dt)
 
 
 @pytest.fixture

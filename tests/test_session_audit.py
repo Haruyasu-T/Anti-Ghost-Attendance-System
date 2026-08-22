@@ -113,7 +113,7 @@ def test_expired_session_is_rejected(db, user):
     # 期限を過去に書き換える
     row = db.query(models.LoginSession).one()
     past = datetime.now(timezone.utc) - timedelta(minutes=1)
-    row.expires_at = past.strftime("%Y-%m-%dT%H:%M:%SZ")
+    row.expires_at = security._to_iso(past)
 
     assert security.get_session_user(db, raw_id) is None
 
