@@ -28,7 +28,7 @@
 | POST | `/attendance-sessions/{id}/rotate-token` | teacher＋担当 | QRを作り直す（出回ったQRを失効させる） |
 | POST | `/attendance-sessions/{id}/close` | teacher＋担当 | セッションを終了 |
 | GET | `/attendance-sessions/{id}/attendances` | teacher＋担当 | 出席状況の一覧 |
-| PATCH | `/attendances/{id}` | teacher＋担当 | 出席記録の手動修正 |
+| PUT | `/attendance-sessions/{id}/attendances/{user_id}` | teacher＋担当 | 出席記録の手動修正（新規追加も同じ） |
 | GET | `/attendance-sessions/{id}/alerts` | teacher＋担当 | 異常検知アラート |
 
 ### 学生向け
@@ -185,7 +185,7 @@ QR表示画面が `rotate_seconds` ごとにポーリングして再描画する
 }
 ```
 
-### PATCH /attendances/{id}
+### PUT /attendance-sessions/{attendance_session_id}/attendances/{user_id}
 
 ```
 { "status": "present", "reason": "QRの読み取り不良を申告．口頭で在室を確認" }
@@ -193,11 +193,23 @@ QR表示画面が `rotate_seconds` ごとにポーリングして再描画する
 
 教員・担当授業のみ．`reason` は必須で，空文字やスペースだけなら400で拒否する．
 
-`attendances` を更新して `record_source` を `manual` にする．同じトランザクションの中で `manual_corrections` に監査行を作り，監査ログの書き込みが失敗したら修正自体をロールバックする．記録の残らない修正を作らないため．
+**当初は `PATCH /attendances/{id}` にしていたが，設計として成立していなかった．**
+「記録が存在しない学生への新規追加も同じエンドポイントで扱う」と書いていたのに，
+`PATCH` は既存レコードのidを指定する形なので，まだ無い記録を作れない．担当Cが
+画面を実装する段階でこの矛盾に気付いた．
 
-記録が存在しない学生への新規追加も同じエンドポイントで扱う（`before_status` がNULLになる）．
+対象を `(セッション, 学生)` で指定する `PUT` に変えることで，**記録があれば更新，
+無ければ作成**を同じ形で扱えるようにした．この組み合わせは `attendances` の
+一意制約とも一致している．
+
+- 対象の学生がその授業を履修しているか確認する（未履修なら400）
+- `attendances` を更新（または作成）して `record_source` を `manual` にする
+- **同じトランザクションの中で `manual_corrections` に監査行を作る**．監査ログの書き込みが失敗したら修正自体をロールバックする．記録の残らない修正を作らないため
+- `before_status` は，記録が無かった場合はNULLになる
 
 `reason` を必須にしたのは，手動修正が出席記録を書き換えられる特権操作だから．記録が残ることを操作者に意識させること自体が抑止になる．入力の手間より監査性を優先した．
+
+> **パスに `user_id` を入れているが，D-8（学生の記録を読むAPIにIDを受け取らせない）と矛盾しない．** D-8は「学生が自分の記録を読む」経路の話で，IDを受け取らないことで他人の記録を覗く攻撃を成立させない，という趣旨．こちらは教員が対象の学生を指定する操作なので，IDの指定は機能そのものに必要．認可は「そのセッションの授業を担当しているか」で担保する．
 
 ### GET /attendance-sessions/{id}/alerts
 
