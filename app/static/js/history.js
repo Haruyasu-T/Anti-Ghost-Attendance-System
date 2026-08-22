@@ -1,0 +1,4 @@
+"use strict";
+const tbody=document.querySelector("#history-rows"),errorBox=document.querySelector("#history-error"),labels={present:"出席",late:"遅刻",absent:"欠席"};
+function esc(value){const span=document.createElement("span");span.textContent=value==null?"":value;return span.innerHTML;}
+(async function(){try{const response=await fetch("/me/attendances",{credentials:"same-origin",headers:{"Accept":"application/json"}});if(!response.ok)throw new Error();const data=await response.json(),rows=Array.isArray(data)?data:data.rows||[];tbody.innerHTML=rows.map(function(row){return"<tr><td>"+esc(row.course_name)+"</td><td>"+esc(row.scheduled_start_at||row.date)+"</td><td><span class=\"status status-"+(row.status||"empty")+"\">"+(labels[row.status]||"未登録")+"</span></td><td>"+(row.scan_count==null?"—":row.scan_count)+"</td></tr>";}).join("")||"<tr><td colspan=\"4\">出席履歴はまだありません。</td></tr>";}catch(e){errorBox.textContent="出席履歴を読み込めませんでした。";errorBox.hidden=false;}})();
