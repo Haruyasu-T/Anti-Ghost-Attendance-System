@@ -196,7 +196,10 @@ Cookieは `HttpOnly` / `Secure` / `SameSite=Lax`．失敗時に「IDが無い」
 
 ### B-7. 手動修正API
 
-`PATCH /attendances/{id}`．`reason` は必須で，空文字は400で拒否．
+`PUT /attendance-sessions/{id}/attendances/{user_id}`．`reason` は必須で，空文字は400で拒否．
+
+当初 `PATCH /attendances/{id}` としていたが，存在しない記録を作れず設計として
+成立していなかったため変更した（[decisions.md](decisions.md) D-15）．
 
 `manual_corrections` への記録と同一トランザクションにする．監査ログの書き込みが失敗したら修正自体をロールバックする．記録の残らない修正を作らないため．`record_source` を `manual` に更新．
 

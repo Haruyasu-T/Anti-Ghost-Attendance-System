@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from app import security
 from app.db import get_db
@@ -104,3 +106,61 @@ def require_session_owner(
         raise HTTPException(status_code=404, detail="見つかりません")
 
     return attendance_session
+
+
+# ============================================================ CSRF対策
+
+
+def csrf_token_for_request(request: Request) -> str:
+    """このリクエストのセッションに対応するCSRFトークンを返す.
+
+    画面を描画するときに使う．テンプレートに `csrf_token` として渡し，
+    JavaScript側はそれを `X-CSRF-Token` ヘッダに載せて送る．
+
+        return templates.TemplateResponse(
+            request=request, name="scan.html",
+            context={"csrf_token": auth.csrf_token_for_request(request)},
+        )
+    """
+    return security.csrf_token_for_session(request.cookies.get(SESSION_COOKIE))
+
+
+# 状態を変えないメソッドはCSRFの対象外
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+# ログインはまだセッションが無いので検証できない（そもそも守るべき状態も無い）．
+# ログインCSRF（被害者を攻撃者のアカウントでログインさせる）は理論上あるが，
+# SameSite=Lax である程度防げるため今回は許容する．
+_CSRF_EXEMPT_PATHS = frozenset({"/auth/login"})
+
+
+class CsrfMiddleware(BaseHTTPMiddleware):
+    """状態を変えるリクエストにCSRFトークンを要求する.
+
+    **エンドポイントごとに付けるのではなくミドルウェアにしている．**
+    このプロジェクトで繰り返し問題になっているのは「1箇所の書き忘れが
+    そのまま穴になる」ことなので，付け忘れが起こりえない形にした．
+    新しいエンドポイントを足しても自動的に守られる．
+
+    使い方（main.py）:
+
+        app.add_middleware(CsrfMiddleware)
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method in _SAFE_METHODS or request.url.path in _CSRF_EXEMPT_PATHS:
+            return await call_next(request)
+
+        raw_session_id = request.cookies.get(SESSION_COOKIE)
+        if raw_session_id is None:
+            # 未ログイン．守るべきセッションが無いので，認可側（401）に任せる．
+            return await call_next(request)
+
+        provided = request.headers.get(security.CSRF_HEADER)
+        if not security.verify_csrf_token(raw_session_id, provided):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "リクエストが検証できませんでした。画面を再読み込みしてください。"},
+            )
+
+        return await call_next(request)
