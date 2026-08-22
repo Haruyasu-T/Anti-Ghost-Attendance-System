@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}出席状況 | 出席管理システム{% endblock %}
+{% block content %}
+<section data-attendance-list data-session-id="{{ session_id }}" data-csrf-token="{{ csrf_token|default('', true) }}">
+ <div class="page-heading"><p class="eyebrow">教員画面</p><h1 id="course-title">出席状況</h1><p id="session-summary" class="muted">読み込み中…</p></div><div id="list-error" class="alert alert-error" role="alert" hidden></div>
+ <div class="table-wrap"><table><thead><tr><th>学籍番号</th><th>氏名</th><th>区分</th><th>読取回数</th><th>注意</th><th>操作</th></tr></thead><tbody id="attendance-rows"><tr><td colspan="6">読み込み中…</td></tr></tbody></table></div>
+</section>
+<dialog id="correction-dialog"><form id="correction-form" class="dialog-body"><h2>出席記録を修正</h2><p id="correction-target"></p><input id="attendance-id" type="hidden"><label for="correction-status">出席区分</label><select id="correction-status" required><option value="present">出席</option><option value="late">遅刻</option><option value="absent">欠席</option></select><label for="correction-reason">修正理由（必須）</label><textarea id="correction-reason" required maxlength="500"></textarea><p class="alert alert-warning">この操作は、変更前後の値と理由を含めて記録されます。</p><div class="dialog-actions"><button class="btn btn-quiet" type="button" data-close-dialog>キャンセル</button><button class="btn btn-primary" type="submit">記録して修正</button></div></form></dialog>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/attendance-list.js') }}" defer></script>{% endblock %}
