@@ -47,9 +47,17 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _require_columns(model, *columns):
+    """モデルに必要なカラムが揃っているか確認する."""
+    missing = [c for c in columns if not hasattr(model, c)]
+    assert not missing, (
+        f"{model.__name__} に必要なカラムがありません: {', '.join(missing)}"
+    )
+
+
 # 時刻カラムは db-design.md の通り「UTCのISO 8601文字列」を前提にしている．
 # B が SQLAlchemy の DateTime 型でモデリングした場合は，ここを datetime に変える．
-NOW = "2026-07-27T01:00:00Z"
+NOW = "2026-07-27T01:00:00.000Z"
 
 
 # ---------------------------------------------------------------- fixtures
@@ -268,6 +276,119 @@ def test_duplicate_enrollment_is_rejected(session, fixture_data):
 
 # -------------------------------------------- ログインセッション
 
+def test_all_designed_tables_exist():
+    """設計にあるテーブルが揃っていること.
+
+    これらが無いと以下が実装できない：
+      audit_logs         … 監査ログ・レート制限・バースト検知（A-8/A-10/A-11）
+      device_bindings    … 端末の紐付け検知（A-9，アカウント貸与への対策）
+      manual_corrections … 手動修正の監査（B-7．要件上の必須項目）
+    """
+    for name in ("AuditLog", "DeviceBinding", "ManualCorrection"):
+        assert hasattr(models, name), (
+            f"{name} が定義されていません（docs/db-design.md 参照）"
+        )
+
+
+def test_attendance_scan_records_the_device(session, fixture_data):
+    """読み取りに device_id を残せること.
+
+    これが無いと「同じ端末で複数アカウント」を検知できず、
+    アカウント貸与への対策が成立しない。
+    """
+    _require_columns(models.AttendanceScan, "device_id")
+
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at=NOW,
+        client_ip="192.168.1.10",
+        device_id="device-abc",
+    ))
+
+    session.flush()
+
+
+def test_attendance_scan_requires_client_ip(session, fixture_data):
+    """client_ip が NOT NULL であること.
+
+    IPが空のレコードができると、バースト検知も事後追跡もできなくなる。
+    """
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at=NOW,
+        # client_ip を渡さない
+    ))
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
+def test_login_session_can_be_revoked(session, fixture_data):
+    """login_sessions に revoked_at があること.
+
+    これが無いとセッションを失効させられず、サーバー側セッションを選んだ
+    理由（教員アカウント乗っ取りへの対応）が失われる（decisions.md D-7）。
+    """
+    _require_columns(models.LoginSession,
+                     "revoked_at", "created_at", "client_ip", "user_agent")
+
+
+def test_attendance_session_records_close_time(session, fixture_data):
+    """attendance_sessions に closed_at があること."""
+    _require_columns(models.AttendanceSession, "closed_at")
+
+
+def test_timestamp_default_matches_the_application_format(session):
+    """DBが自動で入れる時刻と、アプリが入れる時刻の書式が一致すること.
+
+    時刻の範囲検索は文字列の大小比較で行っている（固定長のUTC文字列なら
+    文字列比較＝時系列比較になるため）。桁数が揺れるとこれが壊れる。
+
+    同じ瞬間を "…:00Z" と "…:00.000Z" で表すと、'.'(0x2E) は 'Z'(0x5A) より
+    小さいので後者が常に「古い」と判定される。レート制限は audit_logs を
+    この比較で絞っているので、失敗が数え落とされて総当たりがすり抜ける。
+
+    そのため「両方がISO 8601であること」では不十分で、**桁数まで一致**して
+    いる必要がある。
+    """
+    import re
+
+    from app import security
+
+    session.add(models.AuditLog(action="login", result="failure"))
+    session.flush()
+
+    from_db = session.query(models.AuditLog).one().occurred_at
+    from_app = security._to_iso(security._utcnow())
+
+    pattern = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"
+    assert re.fullmatch(pattern, from_db), f"DB側の書式が想定外: {from_db!r}"
+    assert re.fullmatch(pattern, from_app), f"アプリ側の書式が想定外: {from_app!r}"
+    assert len(from_db) == len(from_app)
+
+
+def test_timestamp_check_constraint_rejects_wrong_format(session, fixture_data):
+    """書式の違う時刻をDBが拒否すること（最後の防壁）.
+
+    アプリ側で書式を揃えるのが本筋だが、誰かが別の書式で書き込もうとしたら
+    静かに壊れるのではなく、その場で失敗してほしい。
+    """
+    session.add(models.AttendanceScan(
+        attendance_session_id=fixture_data["att_session"].id,
+        user_id=fixture_data["student"].id,
+        scan_seq=1,
+        scanned_at="2026-07-27 01:00:00",   # 'T' も 'Z' もミリ秒もない
+        client_ip="192.168.1.10",
+    ))
+
+    with pytest.raises(IntegrityError):
+        session.flush()
+
+
 def test_login_session_is_keyed_by_hash(session, fixture_data):
     """login_sessions の主キーが id_hash であること.
 
@@ -283,7 +404,7 @@ def test_login_session_is_keyed_by_hash(session, fixture_data):
         id_hash="a" * 64,
         user_id=fixture_data["student"].id,
         last_used_at=NOW,
-        expires_at="2026-07-28T01:00:00Z",
+        expires_at="2026-07-28T01:00:00.000Z",
     ))
 
     session.flush()  # 例外が出なければ成功
