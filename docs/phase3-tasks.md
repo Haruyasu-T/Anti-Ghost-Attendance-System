@@ -75,7 +75,7 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 タイムゾーンなしの `datetime` は `ValueError` で落とす．
 
-### A-6. ログインセッション（B-1完了後）
+### A-6. ログインセッション ✅ 実装済み
 
 `create_login_session` / `get_session_user` / `revoke_login_session` / `revoke_all_sessions_for_user`．
 
@@ -87,33 +87,54 @@ PRは原則1タスク1本．大きくなるほどレビューが形だけにな�
 
 完了の目安：`revoke_login_session` を呼んだ後，同じCookieでアクセスすると401になる．
 
-### A-7. 認可の依存関数
+B-1のマージにより動作確認済み．
+
+### A-7. 認可の依存関数 ✅ 実装済み
 
 `require_login()` / `require_role("teacher")` / `require_course_owner()` / `require_session_owner()`．
 
 FastAPIの `Depends` として宣言的に付ける形にする．各エンドポイントに `if` を書く方式にしない．1箇所の書き忘れがそのまま脆弱性になる．
 
+`app/auth.py` に置いた．`security.py` をHTTPから切り離しておくため．
+DBセッションの受け渡しに `app/db.py` も暫定で作った（担当Bが引き取ってよい）．
+
 完了の目安：学生のセッションで教員用エンドポイントを叩くと403，他の教員の授業を指定すると404．
 
-### A-8. 監査ログ
 
-`write_audit_log(...)`．パスワードとトークンを `detail` に入れない．
+
+### A-8. 監査ログ ✅ 実装済み
+
+`write_audit_log(db, ...)` と `write_audit_log_now(session_factory, ...)` の2つ．
+
+後者は独立したトランザクションで即コミットする．失敗して例外を投げる経路で
+前者を使うと，ロールバックでログごと消えてしまうため．拒否された試行こそ
+後から追いたい情報なので経路を分けた．
+
+パスワードとトークンを `detail` に入れない．秘密鍵の混入は実装側でも弾く．
 
 完了の目安：ログイン成功・失敗の両方が `audit_logs` に残る．
 
-### A-9. 端末の紐付け
+
+
+### A-9. 端末の紐付け ✅ 実装済み
 
 `issue_device_id()` / `check_device_binding(device_id, user_id)`．HttpOnly Cookieで配る．ブロックせず検知・記録だけ．
 
 完了の目安：別アカウントで同じ `device_id` を使うと `conflict` が返り `audit_logs` に記録される．登録自体は成功する．
 
-### A-10. レート制限
+### A-10. レート制限 ✅ 実装済み
 
 `is_login_rate_limited(login_id, client_ip)`．`login_id` 別と `client_ip` 別の両方を見る．片方だけだと分散攻撃か総当たりのどちらかを取り逃す．
 
-### A-11. バースト検知
+### A-11. バースト検知 ✅ 実装済み
 
-`detect_burst(attendance_session_id, client_ip)`．
+`detect_burst(db, attendance_session_id, device_id=None, client_ip=None)`．
+
+数えるのは件数ではなく人数（重複しない `user_id`）．1人が1回目と2回目を読むのは
+正常なので，件数で数えると誤検知になる．
+
+判定の主役は `device_id`．外部にデプロイすると学内の学生は全員が大学のNATの
+出口IPで届くため，IPでの判定はほぼ機能しない．
 
 ### A-12. B・CのPRレビュー（継続）
 
