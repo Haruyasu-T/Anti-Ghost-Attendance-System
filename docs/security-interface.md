@@ -346,6 +346,67 @@ def me(user = Depends(require_login)):
             "display_name": user.display_name}
 ```
 
+## CSRF対策
+
+```python
+security.csrf_token_for_session(raw_session_id) -> str
+security.verify_csrf_token(raw_session_id, provided) -> bool
+auth.csrf_token_for_request(request) -> str        # 画面描画時に使う
+auth.CsrfMiddleware                                # main.py に add_middleware する
+```
+
+**方式：ログインセッションからHMACで導出する（サーバー側に保存しない）．**
+
+```
+csrf_token = HMAC-SHA256(TOKEN_SECRET, "csrf:" + セッションIDのハッシュ)
+```
+
+セッションごとに違う値になり，秘密鍵が無ければ計算できない．DBにカラムを足す必要がなく，毎リクエストで再計算して照合できる．トークンの導出に既に使っている考え方と同じ．
+
+**なぜこれで防げるか．** 攻撃者が用意したページからは，
+
+- 同一生成元ポリシーにより，こちらのHTMLに埋め込まれたトークンを読めない
+- セッションCookieはHttpOnlyなのでJavaScriptから読めない
+- 仮に読めたとしても `TOKEN_SECRET` が無いのでトークンを計算できない
+
+したがって正しい `X-CSRF-Token` を付けたリクエストを作れない．
+
+**ミドルウェアで強制する．** エンドポイントごとに付ける方式にしていない．このプロジェクトで繰り返し問題になっているのは「1箇所の書き忘れがそのまま穴になる」ことなので，付け忘れが起こりえない形にした．新しいエンドポイントを足しても自動的に守られる．
+
+```python
+# main.py
+from app.auth import CsrfMiddleware
+app.add_middleware(CsrfMiddleware)
+```
+
+対象外にしているもの：
+
+| 対象外 | 理由 |
+|---|---|
+| GET / HEAD / OPTIONS / TRACE | 状態を変えないため |
+| `POST /auth/login` | まだセッションが無く検証できない．守るべき状態も無い |
+| 未ログインのリクエスト | セッションが無いのでCSRFで守る対象が無い．認可側の401に任せる |
+
+ログインCSRF（被害者を攻撃者のアカウントでログインさせる）は理論上あるが，`SameSite=Lax` である程度防げるため今回は許容する．
+
+**画面側の使い方.** テンプレートに `csrf_token` を渡し，JavaScriptがヘッダに載せる．
+
+```python
+return templates.TemplateResponse(
+    request=request, name="scan.html",
+    context={"csrf_token": auth.csrf_token_for_request(request)},
+)
+```
+
+```html
+<section data-csrf-token="{{ csrf_token }}">
+```
+
+```javascript
+fetch("/attendances", { method: "POST", credentials: "same-origin",
+  headers: { "X-CSRF-Token": shell.dataset.csrfToken } })
+```
+
 ## 時刻の書式
 
 DBに入れる時刻は **"YYYY-MM-DDTHH:MM:SS.mmmZ"（ミリ秒3桁・24文字固定）** に統一する．
