@@ -386,6 +386,48 @@ def revoke_all_sessions_for_user(db, user_id: int) -> int:
     return len(rows)
 
 
+# ======================================================== CSRFトークン
+#
+# 方式：ログインセッションから HMAC で導出する（サーバー側に保存しない）．
+#
+#     csrf_token = HMAC-SHA256(TOKEN_SECRET, "csrf:" + セッションIDのハッシュ)
+#
+# セッションごとに違う値になり，秘密鍵が無ければ計算できない．DBにカラムを
+# 足す必要がなく，毎リクエストで再計算して照合できる．
+#
+# なぜこれで防げるか：攻撃者が用意したページからは，
+#   - 同一生成元ポリシーにより，こちらのHTMLに埋め込まれたトークンを読めない
+#   - セッションCookieはHttpOnlyなのでJavaScriptから読めない
+#   - 仮に読めたとしても TOKEN_SECRET が無いのでトークンを計算できない
+# したがって正しい `X-CSRF-Token` を付けたリクエストを作れない．
+#
+# CookieのSameSite=Laxだけでもクロスサイトの POST は概ね止まるが，
+# ブラウザの実装や設定に依存する部分なので，多層防御として併用する．
+
+CSRF_TOKEN_LENGTH = 32
+CSRF_HEADER = "X-CSRF-Token"
+
+
+def csrf_token_for_session(raw_session_id: str | None) -> str:
+    """セッションに対応するCSRFトークンを返す．未ログインなら空文字."""
+    if not raw_session_id:
+        return ""
+
+    message = f"csrf:{_sha256_hex(raw_session_id)}".encode("utf-8")
+    digest = hmac.new(
+        get_settings().token_secret.encode("utf-8"), message, hashlib.sha256
+    ).hexdigest()
+    return digest[:CSRF_TOKEN_LENGTH]
+
+
+def verify_csrf_token(raw_session_id: str | None, provided: str | None) -> bool:
+    """送られてきたCSRFトークンが，そのセッションのものか判定する."""
+    if not raw_session_id or not provided:
+        return False
+    # 比較は定数時間で行う（トークン検証と同じ理由）
+    return hmac.compare_digest(csrf_token_for_session(raw_session_id), provided)
+
+
 # ==================================================== A-8. 監査ログ
 
 
