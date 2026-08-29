@@ -835,15 +835,13 @@ def register_attendance(
     # 7. トークン検証．期限切れと不正の区別はしない（上記の理由により）．
     result = security.classify_token(sess.id, sess.token_salt, payload.token)
     if result is not security.TokenCheck.VALID:
-        security.write_audit_log_now(
-            get_session_factory(),
-            action="attendance_register",
-            result="failure",
-            actor_user_id=user.id,
-            client_ip=client_ip,
-            detail=result.value,
+        raise _reject_now(
+            status.HTTP_403_FORBIDDEN,
+            "QRを読み取れませんでした。もう一度読み取ってください",
+            result.value,
+            target_type="attendance_session",
+            target_id=sess.id
         )
-        raise HTTPException(403, "QRを読み取れませんでした。もう一度読み取ってください")
 
     # 8. 何回目の読み取りか
     scan_seq = (
