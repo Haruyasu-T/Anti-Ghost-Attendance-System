@@ -33,6 +33,7 @@ from app import models, security
 from app.auth import (
     DEVICE_COOKIE,
     SESSION_COOKIE,
+    CsrfMiddleware,
     require_course_owner,
     require_login,
     require_role,
@@ -49,6 +50,12 @@ from app.db import get_db, get_session_factory
 SCHEDULED_START_TOLERANCE = timedelta(hours=3)
 
 app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム")
+
+# 状態を変えるリクエストにCSRFトークンを要求する（decisions.md D-14）．
+# エンドポイントごとに require_csrf 相当を付ける方式にしていないのは，
+# 「1箇所の書き忘れがそのまま穴になる」ことを避けるため．新しいエンドポイントを
+# 足しても自動的に守られる状態にしておく（security-interface.md 参照）．
+app.add_middleware(CsrfMiddleware)
 
 
 @app.get("/health")
@@ -222,12 +229,16 @@ def login(
             max_age=400 * 24 * 60 * 60,  # ブラウザが許容する上限に寄せた長期Cookie
         )
 
-    # todo: CSRFトークンの発行方法（Cookie+ヘッダ方式か，レスポンスボディで
-    # 返すか）が security-interface.md 側で未確定のため，ここでは発行しない．
-    # B-5（POST /attendances）の検証順序#3もこれに依存するため，現状は
-    # スキップしている（実装時にコメントを入れて明示）．
+    # CSRFトークンをレスポンスボディで返す．
+    # `auth.csrf_token_for_request` はテンプレート描画（TemplateResponse）を
+    # 前提にした経路（担当C側）だが，このAPI自体はHTMLを描画しないJSON APIなので，
+    # `security.csrf_token_for_session` を直接使い，ここで完結させる．
+    # セキュリティ上の強さはHTML埋め込み方式と同等（同一オリジンのスクリプトしか
+    # このレスポンスボディを読めないため）．JS側はこの値を保持し，以降の
+    # 状態変更リクエストで `X-CSRF-Token` ヘッダに載せる．
+    csrf_token = security.csrf_token_for_session(raw_session_id)
 
-    return {"status": "ok"}
+    return {"status": "ok", "csrf_token": csrf_token}
 
 
 @app.post("/auth/logout")
@@ -458,10 +469,15 @@ def close_attendance_session(
 # 実装する．IP検証をトークン検証より前に置くのは意図的（D-5：学外からの
 # 試行にトークンの有効性を漏らさないため）．
 #
-# 実装時点で次の3点が未確定・未実装のまま残っている（担当Aと要確認）：
-#   #3  CSRF検証 … 発行方法が security-interface.md 側で未確定のため todo
+# 実装時点で次の点が未解決のまま残っている（担当Aと要確認）：
 #   #7  「期限切れ」と「不正」の区別 … security.verify_token の公開契約は
 #       bool のみなので区別できない．今は「無効なQRです」に統一している
+#
+# 解消済み：
+#   #3  CSRF検証 … CsrfMiddleware を app に登録し，POST /attendances を含む
+#       状態変更系リクエスト全体に適用済み（このファイル冒頭の
+#       app.add_middleware(CsrfMiddleware) 参照）．エンドポイント個別の
+#       チェックは書かない方針のまま
 #   #10 device_id の発行元 … login 時に（未発行なら）発行するようにした
 #       （このファイル内 /auth/login 参照）
 
@@ -483,8 +499,9 @@ def register_attendance(
     user: models.User = Depends(require_role("student")),
     db: Session = Depends(get_db),
 ):
-    # todo: #3 CSRFトークンの検証．login側の発行が未確定のため未実装．
-    # 発行方式が決まり次第，ここに require_csrf 相当のチェックを先頭で入れる．
+    # CSRF検証はミドルウェア（CsrfMiddleware）が担当し，ここには書かない．
+    # このエンドポイントに個別のチェックを足すと，将来別のPOSTエンドポイントで
+    # 付け忘れる余地を残すことになる．
 
     client_ip = security.get_client_ip(request)
     device_id = request.cookies.get(DEVICE_COOKIE)
@@ -578,7 +595,7 @@ def register_attendance(
         classified = security.classify_attendance(scheduled_start_at, now)
         if classified is None:
             raise _reject_now(
-                status.HTTP_403_FORBIDDEN, "受付時間を過ぎています", "outside_window",
+                status.HTTP_403_FORBIDDEN, "受付時間外です", "outside_window",
                 target_type="attendance_session", target_id=sess.id,
             )
         attendance_status = classified.value
