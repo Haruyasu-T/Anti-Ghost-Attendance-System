@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}QR読み取り | 出席管理システム{% endblock %}
+{% block content %}
+<section class="scanner-shell" data-csrf-token="{{ csrf_token|default('', true) }}">
+ <div class="page-heading"><p class="eyebrow">出席登録</p><h1>QRを読み取る</h1><p class="muted">カメラへのアクセスを許可してください。</p></div>
+ <div id="qr-reader" aria-label="QRコード読み取り領域"></div>
+ <section id="scan-result" class="card result-card" hidden aria-live="assertive"><div class="result-symbol" aria-hidden="true"></div><h2 id="result-title"></h2><p id="result-message"></p><div class="button-row"><button id="retry-scan" class="btn btn-primary" type="button">もう一度読む</button><a class="btn btn-quiet" href="/">ホームへ戻る</a></div></section>
+ <div id="scanner-error" class="alert alert-error" role="alert" hidden></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js" integrity="sha512-r6rDA7W6ZeQhvl8S7yRVQUKVHdexq+GAlNkNNqVC7YyIV+NwqCTJe2hDWCiffTyRNOeGEzRRJ9ifvRm/HCzGYg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="{{ url_for('static', path='js/scan.js') }}" defer></script>
+{% endblock %}
