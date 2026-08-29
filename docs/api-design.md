@@ -10,34 +10,34 @@
 
 ### 認証
 
-| メソッド | パス | 認可 | 概要 |
-|---|---|---|---|
-| POST | `/auth/login` | 誰でも | ログイン．レート制限あり |
-| POST | `/auth/logout` | 要ログイン | ログアウト |
-| GET | `/auth/me` | 要ログイン | 自分のロールと表示名 |
+| メソッド | パス           | 認可       | 概要                     |
+| -------- | -------------- | ---------- | ------------------------ |
+| POST     | `/auth/login`  | 誰でも     | ログイン．レート制限あり |
+| POST     | `/auth/logout` | 要ログイン | ログアウト               |
+| GET      | `/auth/me`     | 要ログイン | 自分のロールと表示名     |
 
 ### 教員向け
 
-| メソッド | パス | 認可 | 概要 |
-|---|---|---|---|
-| GET | `/courses` | teacher | 自分が担当する授業の一覧 |
-| POST | `/courses/{course_id}/attendance-sessions` | teacher＋担当 | 出席セッションを開始 |
-| GET | `/attendance-sessions/{id}` | teacher＋担当 | セッションの状態 |
-| GET | `/attendance-sessions/{id}/token` | teacher＋担当 | 現在有効なトークン（QR描画用） |
-| POST | `/attendance-sessions/{id}/rescan` | teacher＋担当 | 2回目以降のQR再表示を開始 |
-| POST | `/attendance-sessions/{id}/rotate-token` | teacher＋担当 | QRを作り直す（出回ったQRを失効させる） |
-| POST | `/attendance-sessions/{id}/close` | teacher＋担当 | セッションを終了 |
-| GET | `/attendance-sessions/{id}/attendances` | teacher＋担当 | 出席状況の一覧 |
-| PUT | `/attendance-sessions/{id}/attendances/{user_id}` | teacher＋担当 | 出席記録の手動修正（新規追加も同じ） |
-| GET | `/attendance-sessions/{id}/alerts` | teacher＋担当 | 異常検知アラート |
+| メソッド | パス                                              | 認可          | 概要                                   |
+| -------- | ------------------------------------------------- | ------------- | -------------------------------------- |
+| GET      | `/courses`                                        | teacher       | 自分が担当する授業の一覧               |
+| POST     | `/courses/{course_id}/attendance-sessions`        | teacher＋担当 | 出席セッションを開始                   |
+| GET      | `/attendance-sessions/{id}`                       | teacher＋担当 | セッションの状態                       |
+| GET      | `/attendance-sessions/{id}/token`                 | teacher＋担当 | 現在有効なトークン（QR描画用）         |
+| POST     | `/attendance-sessions/{id}/rescan`                | teacher＋担当 | 2回目以降のQR再表示を開始              |
+| POST     | `/attendance-sessions/{id}/rotate-token`          | teacher＋担当 | QRを作り直す（出回ったQRを失効させる） |
+| POST     | `/attendance-sessions/{id}/close`                 | teacher＋担当 | セッションを終了                       |
+| GET      | `/attendance-sessions/{id}/attendances`           | teacher＋担当 | 出席状況の一覧                         |
+| PUT      | `/attendance-sessions/{id}/attendances/{user_id}` | teacher＋担当 | 出席記録の手動修正（新規追加も同じ）   |
+| GET      | `/attendance-sessions/{id}/alerts`                | teacher＋担当 | 異常検知アラート                       |
 
 ### 学生向け
 
-| メソッド | パス | 認可 | 概要 |
-|---|---|---|---|
-| GET | `/scan` | student | QRから遷移する画面 |
-| POST | `/attendances` | student | 出席登録 |
-| GET | `/me/attendances` | 要ログイン | 自分の出席履歴 |
+| メソッド | パス              | 認可       | 概要               |
+| -------- | ----------------- | ---------- | ------------------ |
+| GET      | `/scan`           | student    | QRから遷移する画面 |
+| POST     | `/attendances`    | student    | 出席登録           |
+| GET      | `/me/attendances` | 要ログイン | 自分の出席履歴     |
 
 ## 認可で特に気をつけること
 
@@ -78,20 +78,20 @@ X-CSRF-Token: <CSRFトークン>
 
 ### 検証の順序
 
-| # | 検証 | 失敗時 |
-|---|---|---|
-| 1 | ログイン済みか | 401 |
-| 2 | ロールが `student` か | 403 |
-| 3 | CSRFトークンが正しいか | 403 |
-| 4 | アクセス元IPが学内レンジか | 403 |
-| 5 | セッションが存在し `open` か | 404 / 409 |
-| 6 | その授業を履修しているか | 403 |
-| 7 | トークンが有効か（現在世代または直前1世代） | 403 |
-| 8 | 何回目の読み取りか．`required_scan_count` を超えないか | 409 |
-| 9 | （1回目のみ）受付時間帯の判定 | 403 |
-| 10 | 端末の紐付けを確認 | ブロックしない．検知して記録するだけ |
-| 11 | トランザクション内で記録．一意制約違反は409に変換 | 409 |
-| 12 | 監査ログに記録（成功も失敗も） | — |
+| #   | 検証                                                   | 失敗時                               |
+| --- | ------------------------------------------------------ | ------------------------------------ |
+| 1   | ログイン済みか                                         | 401                                  |
+| 2   | ロールが `student` か                                  | 403                                  |
+| 3   | CSRFトークンが正しいか                                 | 403                                  |
+| 4   | アクセス元IPが学内レンジか                             | 403                                  |
+| 5   | セッションが存在し `open` か                           | 404 / 409                            |
+| 6   | その授業を履修しているか                               | 403                                  |
+| 7   | トークンが有効か（現在世代または直前1世代）            | 403                                  |
+| 8   | 何回目の読み取りか．`required_scan_count` を超えないか | 409                                  |
+| 9   | （1回目のみ）受付時間帯の判定                          | 403                                  |
+| 10  | 端末の紐付けを確認                                     | ブロックしない．検知して記録するだけ |
+| 11  | トランザクション内で記録．一意制約違反は409に変換      | 409                                  |
+| 12  | 監査ログに記録（成功も失敗も）                         | —                                    |
 
 **IP検証をトークン検証より前に置いているのは意図的**．学外からの試行に対して，トークンが有効かどうかの情報を一切返さないため．トークン検証を先にすると，攻撃者は学外から「このトークンはまだ有効か」を試せてしまう．転送したQRの有効性を確認する手段を与えることになる．IP検証を先に置けば，学外からの試行はすべて同じ応答になって何も分からない．
 
@@ -109,13 +109,13 @@ X-CSRF-Token: <CSRFトークン>
 
 学生が自分で対処できる情報は返したいが，攻撃者に手掛かりを与えたくない．この2つがぶつかるので，こう整理した．
 
-| 失敗の種類 | 返すメッセージ | 監査ログの `detail` |
-|---|---|---|
-| IP検証の失敗 | 「学内ネットワークからアクセスしてください」 | `off_campus` |
-| トークン期限切れ | 「QRを読み取れませんでした．もう一度読み取ってください」 | `expired_token` |
-| トークンが不正 | **同上（同じメッセージ）** | `invalid_token` |
-| 受付時間帯外 | 「受付時間を過ぎています」 | `outside_window` |
-| 未履修 | 「この授業の履修者ではありません」 | `not_enrolled` |
+| 失敗の種類       | 返すメッセージ                                           | 監査ログの `detail` |
+| ---------------- | -------------------------------------------------------- | ------------------- |
+| IP検証の失敗     | 「学内ネットワークからアクセスしてください」             | `off_campus`        |
+| トークン期限切れ | 「QRを読み取れませんでした．もう一度読み取ってください」 | `expired_token`     |
+| トークンが不正   | **同上（同じメッセージ）**                               | `invalid_token`     |
+| 受付時間帯外     | 「受付時間を過ぎています」                               | `outside_window`    |
+| 未履修           | 「この授業の履修者ではありません」                       | `not_enrolled`      |
 
 **「期限切れ」と「不正」は，内部では区別するが，学生には同じメッセージを返す．**
 
@@ -183,14 +183,38 @@ QR表示画面が `rotate_seconds` ごとにポーリングして再描画する
 {
   "session": { "id": 12, "course_name": "情報セキュリティ", "required_scan_count": 2 },
   "rows": [
-    { "login_id": "S0001", "display_name": "…", "status": "present",
-      "scan_count": 2, "record_source": "auto", "alerts": [] },
-    { "login_id": "S0002", "display_name": "…", "status": "present",
-      "scan_count": 1, "record_source": "auto", "alerts": ["1回目のみ"] },
-    { "login_id": "S0003", "display_name": "…", "status": "late",
-      "scan_count": 1, "record_source": "manual", "alerts": [] },
-    { "login_id": "S0004", "display_name": "…", "status": null,
-      "scan_count": 0, "record_source": null, "alerts": [] }
+    {
+      "login_id": "S0001",
+      "display_name": "…",
+      "status": "present",
+      "scan_count": 2,
+      "record_source": "auto",
+      "alerts": []
+    },
+    {
+      "login_id": "S0002",
+      "display_name": "…",
+      "status": "present",
+      "scan_count": 1,
+      "record_source": "auto",
+      "alerts": ["1回目のみ"]
+    },
+    {
+      "login_id": "S0003",
+      "display_name": "…",
+      "status": "late",
+      "scan_count": 1,
+      "record_source": "manual",
+      "alerts": []
+    },
+    {
+      "login_id": "S0004",
+      "display_name": "…",
+      "status": null,
+      "scan_count": 0,
+      "record_source": null,
+      "alerts": []
+    }
   ]
 }
 ```
@@ -225,10 +249,10 @@ QR表示画面が `rotate_seconds` ごとにポーリングして再描画する
 
 2種類のアラートを返す．
 
-| 種類 | 判定方法 |
-|---|---|
+| 種類           | 判定方法                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------ |
 | 端末の使い回し | `device_bindings` に別アカウントで登録済みの `device_id` からの読み取り（`audit_logs` の `device_conflict`） |
-| バースト登録 | 同一 `client_ip` から一定時間内に閾値を超える件数の登録（`attendance_scans` を集計） |
+| バースト登録   | 同一 `client_ip` から一定時間内に閾値を超える件数の登録（`attendance_scans` を集計）                         |
 
 どちらもブロックはせず，教員に見せて判断を委ねる．
 
@@ -249,14 +273,14 @@ require_session_owner(sess)   … セッションの授業の担当か確認
 
 ### HTTPステータスの使い分け
 
-| コード | 用途 |
-|---|---|
-| 400 | リクエストの形式が不正 |
-| 401 | 未ログイン |
-| 403 | ログイン済みだが権限がない／検証に失敗した |
-| 404 | 対象が存在しない（他人のリソースを隠す目的でも使う） |
-| 409 | 状態の衝突（二重登録・終了済みセッションなど） |
-| 429 | レート制限 |
+| コード | 用途                                                 |
+| ------ | ---------------------------------------------------- |
+| 400    | リクエストの形式が不正                               |
+| 401    | 未ログイン                                           |
+| 403    | ログイン済みだが権限がない／検証に失敗した           |
+| 404    | 対象が存在しない（他人のリソースを隠す目的でも使う） |
+| 409    | 状態の衝突（二重登録・終了済みセッションなど）       |
+| 429    | レート制限                                           |
 
 他の教員の授業を指定された場合は403ではなく404を返す．403だと「そのIDのリソースは存在する」ことが分かってしまうため．
 
