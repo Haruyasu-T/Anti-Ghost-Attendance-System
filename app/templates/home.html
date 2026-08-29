@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}学生ホーム | 出席管理システム{% endblock %}
+{% block header_actions %}
+<button class="btn btn-quiet btn-small" type="button" data-logout>ログアウト</button>
+{% endblock %}
+{% block content %}
+<section class="page-heading">
+    <p class="eyebrow">学生ホーム</p>
+    <h1>こんにちは{% if display_name %}、{{ display_name }}さん{% endif %}</h1>
+</section>
+<nav class="action-grid" aria-label="学生メニュー">
+    <a class="action-card action-card-primary" href="/scan">
+        <span class="action-icon" aria-hidden="true">▣</span><span>QRを読み取る</span>
+        <small>カメラを起動して出席を登録</small>
+    </a>
+    <a class="action-card" href="/history">
+        <span class="action-icon" aria-hidden="true">✓</span><span>自分の出席履歴</span>
+        <small>本人の記録だけを確認</small>
+    </a>
+</nav>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
+{% endblock %}
