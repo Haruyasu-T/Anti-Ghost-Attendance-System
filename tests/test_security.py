@@ -157,6 +157,69 @@ def test_malformed_tokens_are_rejected(bad_token):
     assert security.verify_token(1, salt, bad_token, at=BASE) is False
 
 
+def test_classify_token_valid():
+    salt = security.new_token_salt()
+    token = security.generate_token(1, salt, at=BASE)
+
+    assert security.classify_token(1, salt, token, at=BASE) is security.TokenCheck.VALID
+
+
+def test_classify_token_expired():
+    """少し前の世代のトークンは EXPIRED として区別できること.
+
+    監査ログで「読み取りが遅れただけ」と「偽造の試み」を見分けるため。
+    ただし学生に返すメッセージは同じにする（decisions.md D-16）。
+    """
+    salt = security.new_token_salt()
+    token = security.generate_token(1, salt, at=BASE)
+
+    # 受け付ける範囲より後、遡る範囲の中
+    later = BASE + timedelta(seconds=30)
+
+    assert security.classify_token(1, salt, token, at=later) is security.TokenCheck.EXPIRED
+
+
+def test_classify_token_too_old_is_invalid():
+    """遡る範囲より前のトークンは INVALID になること.
+
+    無制限に遡るとHMACの計算回数が増えるので、上限を設けている。
+    """
+    salt = security.new_token_salt()
+    token = security.generate_token(1, salt, at=BASE)
+
+    much_later = BASE + timedelta(minutes=5)
+
+    assert security.classify_token(1, salt, token, at=much_later) is security.TokenCheck.INVALID
+
+
+def test_classify_token_forged_is_invalid():
+    """偽造したトークンは EXPIRED ではなく INVALID になること.
+
+    ここが EXPIRED になると、攻撃者に「形式は正しかった」と伝わってしまう。
+    """
+    salt = security.new_token_salt()
+
+    assert security.classify_token(1, salt, "deadbeefdeadbeef", at=BASE) is security.TokenCheck.INVALID
+
+
+def test_classify_token_from_another_session_is_invalid():
+    """別セッションのトークンは EXPIRED ではなく INVALID になること."""
+    salt = security.new_token_salt()
+    token = security.generate_token(1, salt, at=BASE)
+
+    assert security.classify_token(2, salt, token, at=BASE) is security.TokenCheck.INVALID
+
+
+def test_verify_token_matches_classify_token():
+    """verify_token は classify_token の VALID と一致すること（包みが壊れていない）."""
+    salt = security.new_token_salt()
+    token = security.generate_token(1, salt, at=BASE)
+    expired_at = BASE + timedelta(seconds=30)
+
+    assert security.verify_token(1, salt, token, at=BASE) is True
+    assert security.verify_token(1, salt, token, at=expired_at) is False
+
+
 def test_token_does_not_reveal_the_secret():
     """トークンから秘密鍵が読み取れないこと（HMACの出力であることの確認）."""
     salt = security.new_token_salt()

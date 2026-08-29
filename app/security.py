@@ -124,36 +124,81 @@ def generate_token(session_id: int, token_salt: str, at: datetime | None = None)
     return _derive(session_id, token_salt, window, settings.token_secret)
 
 
+class TokenCheck(str, Enum):
+    """トークン検証の結果.
+
+    **この区別は監査ログ用であって，学生に見せるものではない．**
+    `EXPIRED` と `INVALID` で応答を変えると，攻撃者に「偽造したトークンが
+    形式として正しかったか」を探る手がかり（オラクル）を与えてしまう．
+    学生から見れば取るべき行動はどちらも「もう一度読む」で同じなので，
+    区別して見せる価値もない（decisions.md D-16）．
+    """
+
+    VALID = "valid"      # 受け付ける
+    EXPIRED = "expired"  # 少し前の世代のトークン．読み取りが遅れた
+    INVALID = "invalid"  # どの世代とも一致しない．偽造・改ざん・別セッション
+
+
+# 「期限切れ」と判定するために，受け付ける範囲より更に何世代前まで遡るか．
+# 5秒間隔なら12世代＝60秒前まで．現実の読み取り遅延は10秒以内に収まるので
+# 十分な余裕がある．これより前のものは INVALID として扱う．
+# 遡る数を増やすほどHMACの計算回数が増えるので，青天井にはしない．
+EXPIRED_LOOKBACK_WINDOWS = 12
+
+
+def classify_token(
+    session_id: int,
+    token_salt: str,
+    token: str,
+    at: datetime | None = None,
+) -> TokenCheck:
+    """トークンを検証し，結果を3値で返す.
+
+    現在世代と直前世代（`TOKEN_ACCEPT_PREVIOUS_WINDOWS`）を受け付ける．
+    直前の世代も通すのは，表示が切り替わる直前に読み取りを始めた学生が，
+    カメラの合焦・デコード・通信の遅延で弾かれるのを防ぐため．
+    その代償として，転送に使える猶予が更新間隔の約2倍になる（脅威モデルに記載済み）．
+
+    更に前の世代（`EXPIRED_LOOKBACK_WINDOWS` まで）に一致した場合は `EXPIRED`．
+    どれにも一致しなければ `INVALID`．
+    """
+    if not token:
+        return TokenCheck.INVALID
+
+    settings = get_settings()
+    at = at or _utcnow()
+    window = _window_index(at, settings.qr_rotate_seconds)
+    accept_until = settings.token_accept_previous_windows
+
+    # 一致しても途中で抜けない．抜けると「何世代前で一致したか」が
+    # 処理時間の差として観測できてしまうため，常に同じ回数だけ計算する．
+    valid = False
+    expired = False
+    for back in range(accept_until + EXPIRED_LOOKBACK_WINDOWS + 1):
+        expected = _derive(session_id, token_salt, window - back, settings.token_secret)
+        # `==` ではなく compare_digest を使う．`==`は不一致の位置で処理時間が変わり，
+        # 先頭から1文字ずつ正解を絞り込まれる余地がある．
+        if hmac.compare_digest(expected, token):
+            if back <= accept_until:
+                valid = True
+            else:
+                expired = True
+
+    if valid:
+        return TokenCheck.VALID
+    if expired:
+        return TokenCheck.EXPIRED
+    return TokenCheck.INVALID
+
+
 def verify_token(
     session_id: int,
     token_salt: str,
     token: str,
     at: datetime | None = None,
 ) -> bool:
-    """トークンが現在世代または直前世代として妥当かを判定する.
-
-    直前の世代も受け付けるのは，表示が切り替わる直前に読み取りを始めた学生が，
-    カメラの合焦・デコード・通信の遅延で期限切れになるのを防ぐため．
-    その代償として，転送に使える猶予が更新間隔の約2倍になる（脅威モデルに記載済み）．
-    """
-    if not token:
-        return False
-
-    settings = get_settings()
-    at = at or _utcnow()
-    window = _window_index(at, settings.qr_rotate_seconds)
-
-    # 一致しても途中で抜けない．抜けると「何世代前で一致したか」が
-    # 処理時間の差として観測できてしまうため，常に同じ回数だけ計算する．
-    matched = False
-    for back in range(settings.token_accept_previous_windows + 1):
-        expected = _derive(session_id, token_salt, window - back, settings.token_secret)
-        # `==` ではなく compare_digest を使う．`==`は不一致の位置で処理時間が変わり，
-        # 先頭から1文字ずつ正解を絞り込まれる余地がある．
-        if hmac.compare_digest(expected, token):
-            matched = True
-
-    return matched
+    """トークンを受け付けてよいかを真偽値で返す（`classify_token` の薄い包み）."""
+    return classify_token(session_id, token_salt, token, at) is TokenCheck.VALID
 
 
 # ============================================================ A-4. アクセス元IP
@@ -268,7 +313,7 @@ def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _to_iso(dt: datetime) -> str:
+def to_iso(dt: datetime) -> str:
     """DBに入れる形式（UTCのISO 8601・ミリ秒3桁の固定長）に変換する.
 
     "2026-08-22T10:00:00.123Z" のように**必ず24文字**になる．
@@ -285,12 +330,25 @@ def _to_iso(dt: datetime) -> str:
     return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{dt.microsecond // 1000:03d}Z"
 
 
-def _from_iso(value: str) -> datetime:
-    """DBから読んだISO 8601文字列をawareなdatetimeにする."""
+def from_iso(value: str) -> datetime:
+    """DBから読んだISO 8601文字列をawareなdatetimeにする.
+
+    **DBから読んだ値の変換に使う関数**であって，クライアント入力の検証には
+    使わない．タイムゾーンが無ければ黙ってUTCとみなすので，フロントが
+    JST→UTCの変換を忘れて送ってきた場合に気付けない．クライアント入力は
+    呼び出し側でタイムゾーンの有無まで明示的に検証すること．
+    """
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+# 当初は内部用のつもりでアンダースコア付きにしていたが，`main.py` 側でも
+# 時刻の変換が必要になったため公開名にした．テストが旧名を参照しているので
+# 別名も残す（次に触るときに整理してよい）．
+_to_iso = to_iso
+_from_iso = from_iso
 
 
 # ============================================== A-6. ログインセッション
@@ -321,9 +379,9 @@ def create_login_session(
         models.LoginSession(
             id_hash=_sha256_hex(raw_id),
             user_id=user_id,
-            created_at=_to_iso(now),
-            last_used_at=_to_iso(now),
-            expires_at=_to_iso(now + lifetime),
+            created_at=to_iso(now),
+            last_used_at=to_iso(now),
+            expires_at=to_iso(now + lifetime),
             client_ip=client_ip,
             user_agent=user_agent,
         )
@@ -344,10 +402,10 @@ def get_session_user(db, session_id: str | None):
         return None
     if row.revoked_at is not None:
         return None
-    if _from_iso(row.expires_at) <= _utcnow():
+    if from_iso(row.expires_at) <= _utcnow():
         return None
 
-    row.last_used_at = _to_iso(_utcnow())
+    row.last_used_at = to_iso(_utcnow())
     return db.get(models.User, row.user_id)
 
 
@@ -360,7 +418,7 @@ def revoke_login_session(db, session_id: str | None) -> None:
 
     row = db.get(models.LoginSession, _sha256_hex(session_id))
     if row is not None and row.revoked_at is None:
-        row.revoked_at = _to_iso(_utcnow())
+        row.revoked_at = to_iso(_utcnow())
 
 
 def revoke_all_sessions_for_user(db, user_id: int) -> int:
@@ -372,7 +430,7 @@ def revoke_all_sessions_for_user(db, user_id: int) -> int:
     """
     from app import models
 
-    now = _to_iso(_utcnow())
+    now = to_iso(_utcnow())
     rows = (
         db.query(models.LoginSession)
         .filter(
@@ -472,7 +530,7 @@ def write_audit_log(
 
     db.add(
         models.AuditLog(
-            occurred_at=_to_iso(_utcnow()),
+            occurred_at=to_iso(_utcnow()),
             action=action,
             result=result,
             actor_user_id=actor_user_id,
@@ -533,7 +591,7 @@ def check_device_binding(db, device_id: str | None, user_id: int) -> DeviceCheck
     if not device_id:
         return DeviceCheckResult.OK
 
-    now = _to_iso(_utcnow())
+    now = to_iso(_utcnow())
     binding = db.get(models.DeviceBinding, device_id)
 
     if binding is None:
@@ -578,7 +636,7 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
     lookback = timedelta(
         minutes=settings.login_window_minutes + settings.login_lockout_minutes
     )
-    since = _to_iso(now - lookback)
+    since = to_iso(now - lookback)
 
     def _locked_by(column, value) -> bool:
         if not value:
@@ -599,13 +657,13 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
         if not times:
             return False
 
-        last_failure = max(_from_iso(t) for t in times)
+        last_failure = max(from_iso(t) for t in times)
         if now - last_failure >= timedelta(minutes=settings.login_lockout_minutes):
             return False  # ロック期間を過ぎている
 
         # 最後の失敗から遡って window 分の失敗を数える
         window_start = last_failure - timedelta(minutes=settings.login_window_minutes)
-        recent = [t for t in times if _from_iso(t) >= window_start]
+        recent = [t for t in times if from_iso(t) >= window_start]
         return len(recent) >= settings.login_max_failures
 
     return (
@@ -637,7 +695,7 @@ def detect_burst(
     from app import models
 
     settings = get_settings()
-    since = _to_iso(_utcnow() - timedelta(seconds=settings.burst_window_seconds))
+    since = to_iso(_utcnow() - timedelta(seconds=settings.burst_window_seconds))
 
     def _distinct_users(column, value) -> int:
         if not value:
