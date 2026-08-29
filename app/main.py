@@ -1,5 +1,5 @@
 """
-FastAPI エントリポイント（フェーズ3 担当B）．
+FastAPI エントリポイント．
 
 api-design.md の「認証」セクションに対応する3エンドポイントを実装する．
 
@@ -26,13 +26,16 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, security
 from app.auth import (
+    DEVICE_COOKIE,
     SESSION_COOKIE,
     require_course_owner,
     require_login,
+    require_role,
     require_session_owner,
 )
 from app.config import get_settings
@@ -198,8 +201,24 @@ def login(
         samesite="lax",  # SameSite=Strict にしない理由は api-design.md 参照
     )
 
+    # device_id は「端末を跨いで・ログインを跨いで」同じ値を保つことに意味がある
+    # （device_bindings による端末の使い回し検知はこれが前提）．
+    # 既に持っている端末には発行し直さない．毎回発行し直すと，ログインの度に
+    # 別端末として扱われてしまい，検知の意味がなくなる．
+    if request.cookies.get(DEVICE_COOKIE) is None:
+        response.set_cookie(
+            key=DEVICE_COOKIE,
+            value=security.issue_device_id(),
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            max_age=400 * 24 * 60 * 60,  # ブラウザが許容する上限に寄せた長期Cookie
+        )
+
     # todo: CSRFトークンの発行方法（Cookie+ヘッダ方式か，レスポンスボディで
     # 返すか）が security-interface.md 側で未確定のため，ここでは発行しない．
+    # B-5（POST /attendances）の検証順序#3もこれに依存するため，現状は
+    # スキップしている（実装時にコメントを入れて明示）．
 
     return {"status": "ok"}
 
