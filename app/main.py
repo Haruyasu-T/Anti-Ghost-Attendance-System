@@ -97,6 +97,29 @@ class TokenResponse(BaseModel):
     next_rotate_at: str
 
 
+class AttendanceSessionSummary(BaseModel):
+    id: int
+    course_name: str
+    required_scan_count: int
+
+
+class AttendanceRow(BaseModel):
+    login_id: str
+    display_name: str
+    # 未登録者は status / record_source が None になる（api-design.md の例の
+    # S0004 に対応）．欠席者を「行が無い」のではなく「区分が空欄の行」として
+    # 見せるため，履修者は必ず1行出す．
+    status: str | None
+    scan_count: int
+    record_source: str | None
+    alerts: list[str]
+
+
+class AttendanceListResponse(BaseModel):
+    session: AttendanceSessionSummary
+    rows: list[AttendanceRow]
+
+
 def _to_session_response(sess: models.AttendanceSession) -> AttendanceSessionResponse:
     return AttendanceSessionResponse(
         id=sess.id,
@@ -461,6 +484,97 @@ def close_attendance_session(
     )
 
     return _to_session_response(sess)
+
+
+# --------------------------------------------------------- 出席状況一覧（B-6）
+#
+# api-design.md「GET /attendance-sessions/{id}/attendances」に対応する．
+# 履修者全員を返し，出席登録が無い学生も「未登録」として含める
+# （phase3-tasks.md B-6／screen-design.md S7．欠席者を見落とさないため）．
+# 認可は require_session_owner のみに委ね，ここに course_id 等の if を書かない
+# （token エンドポイントと同じ方針）．
+
+@app.get(
+    "/attendance-sessions/{attendance_session_id}/attendances",
+    response_model=AttendanceListResponse,
+)
+def list_attendance_session_attendances(
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    db: Session = Depends(get_db),
+):
+    course = db.get(models.Course, sess.course_id)
+
+    # 履修者を login_id 順に取得する．Enrollment 単体には login_id が無いので
+    # User と結合する．表示順を安定させるため login_id でソートしておく
+    # （画面側でソートし直す前提を作らない）．
+    enrolled_users = (
+        db.query(models.User)
+        .join(models.Enrollment, models.Enrollment.user_id == models.User.id)
+        .filter(models.Enrollment.course_id == sess.course_id)
+        .order_by(models.User.login_id)
+        .all()
+    )
+
+    attendances_by_user = {
+        a.user_id: a
+        for a in db.query(models.Attendance)
+        .filter(models.Attendance.attendance_session_id == sess.id)
+        .all()
+    }
+
+    # scan_count は attendance_scans の件数．履修者の人数はこの規模のシステムでは
+    # 高々数十人なので，SQLのGROUP BYを持ち込まずPython側で数える
+    # （このファイルの他のクエリと同じ書き方に揃える）．
+    scan_counts: dict[int, int] = {}
+    for (user_id,) in (
+        db.query(models.AttendanceScan.user_id)
+        .filter(models.AttendanceScan.attendance_session_id == sess.id)
+        .all()
+    ):
+        scan_counts[user_id] = scan_counts.get(user_id, 0) + 1
+
+    rows: list[AttendanceRow] = []
+    for user in enrolled_users:
+        attendance = attendances_by_user.get(user.id)
+        scan_count = scan_counts.get(user.id, 0)
+
+        alerts: list[str] = []
+        # 「1回目だけ読んで中抜けした」学生の警告（requirements.md「2回目以降の
+        # QR再表示」／screen-design.md S7）．
+        #
+        # 注：文書に判定条件の厳密な定義が無いため，ここでの解釈を明記しておく．
+        # 「再表示が行われている（required_scan_count > 1）のに，1回目のスキャン
+        # から増えていない（scan_count == 1）」場合にのみ付ける．2回目までは
+        # 来たが3回目以降を落とした（例：required=3, scan_count=2）ケースへの
+        # warning文言は要件・画面設計のどちらにも定義が無いため，今回は対象外と
+        # した．必要になったら security-interface.md 側の合意ではなく，この
+        # ファイル内の解釈の話なのでB内で決めてよい．
+        if sess.required_scan_count > 1 and scan_count == 1:
+            alerts.append("1回目のみ")
+
+        # 端末重複（device_conflict）やバースト検知のアラートはここに含めない．
+        # あれは B-8（GET .../alerts）の責務で，audit_logs / device_bindings を
+        # 見て初めて判定できる．画面側（担当C）で両エンドポイントの結果を
+        # マージする前提（screen-design.md S7の「アラート」欄）．
+        rows.append(
+            AttendanceRow(
+                login_id=user.login_id,
+                display_name=user.display_name,
+                status=attendance.status if attendance is not None else None,
+                scan_count=scan_count,
+                record_source=attendance.record_source if attendance is not None else None,
+                alerts=alerts,
+            )
+        )
+
+    return AttendanceListResponse(
+        session=AttendanceSessionSummary(
+            id=sess.id,
+            course_name=course.name,
+            required_scan_count=sess.required_scan_count,
+        ),
+        rows=rows,
+    )
 
 
 # ------------------------------------------------------- 出席登録（B-5・核心）
