@@ -97,8 +97,31 @@ DBセッションは第1引数で受け取る．`security.py` の中でセッシ
 def new_token_salt() -> str: ...
 def generate_token(session_id: int, token_salt: str,
                    at: datetime | None = None) -> str: ...
+
+class TokenCheck(str, Enum):
+    VALID   = "valid"      # 受け付ける
+    EXPIRED = "expired"    # 少し前の世代．読み取りが遅れた
+    INVALID = "invalid"    # どの世代とも一致しない．偽造・改ざん・別セッション
+
+def classify_token(session_id: int, token_salt: str, token: str,
+                   at: datetime | None = None) -> TokenCheck: ...
 def verify_token(session_id: int, token_salt: str, token: str,
-                 at: datetime | None = None) -> bool: ...
+                 at: datetime | None = None) -> bool: ...   # classify_token の薄い包み
+```
+
+**`EXPIRED` と `INVALID` を学生に見せ分けないこと（D-16）。** この区別は監査ログ用．応答を変えると，攻撃者は偽造したトークンが「形式として正しかったか」を試せてしまう．学生の取るべき行動はどちらも「もう一度読む」で同じなので，見分けさせる価値もない．
+
+B-5 での使い方：
+
+```python
+result = security.classify_token(sess.id, sess.token_salt, req.token)
+if result is not security.TokenCheck.VALID:
+    security.write_audit_log_now(
+        get_session_factory(), action="attendance_register", result="failure",
+        actor_user_id=user.id, client_ip=client_ip,
+        detail=result.value,          # ← ここは区別する（expired_token / invalid_token）
+    )
+    raise HTTPException(403, "QRを読み取れませんでした。もう一度読み取ってください")
 ```
 
 方式：
@@ -406,6 +429,17 @@ return templates.TemplateResponse(
 fetch("/attendances", { method: "POST", credentials: "same-origin",
   headers: { "X-CSRF-Token": shell.dataset.csrfToken } })
 ```
+
+### 時刻の変換
+
+```python
+def to_iso(dt: datetime) -> str: ...      # DBに入れる形式に変換
+def from_iso(value: str) -> datetime: ... # DBから読んだ値をdatetimeに戻す
+```
+
+`main.py` 側でも時刻の変換が必要になるので公開している．自前で `strftime` を書かず，必ずこれを通すこと（書式が揃わないと範囲検索が壊れる．後述）．
+
+**`from_iso` はDBから読んだ値の変換に使う関数であって，クライアント入力の検証には使わない．** タイムゾーンが無ければ黙ってUTCとみなすので，フロントがJST→UTCの変換を忘れて送ってきた場合に気付けない．クライアント入力はタイムゾーンの有無まで呼び出し側で明示的に弾くこと（④クライアントを信用しない）．
 
 ## 時刻の書式
 
