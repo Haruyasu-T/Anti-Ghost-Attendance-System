@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -44,6 +45,7 @@ from app.auth import (
 )
 from app.config import get_settings
 from app.db import get_db, get_session_factory
+from scripts.init_db import create_tables
 
 # 授業開始時刻の入力許容幅．現在時刻からこれ以上離れた scheduled_start_at は
 # 誤入力とみなして拒否する（api-design.md「現在時刻の前後数時間以内くらい」）．
@@ -66,10 +68,93 @@ templates = Jinja2Templates(directory="app/templates")
 # 画面ルートでも使うので、依存関数をここで1つ作って共有する．
 require_teacher = require_role("teacher")
 
+# --------------------------------------------------------- 起動時のテーブル作成
+#
+# テーブル作成のロジックは `scripts/init_db.py` の `create_tables()` に
+# 一本化されている．`python -m scripts.init_db` で単体実行できるほか，
+# モジュール読み込み＝アプリ起動のタイミングでもここから同じ関数を呼び，
+# テーブルが無ければ作る（テーブルが無いまま `/auth/login` を叩くと
+# 500になるため，このapp起動時の呼び出しも残す）．
+#
+# `create_tables` の中身（`Base.metadata.create_all`）は既存テーブルには
+# 触れない（checkfirst=Trueが既定）ので，二度目以降の起動やDBが既にある
+# 場合に呼んでも安全．初期データ（教員・学生・授業）を入れるのは別の
+# スクリプト（B-2）の役目とし，ここではスキーマの用意だけを行う．
+#
+# 副次効果として，`create_tables()` は内部で `get_engine()`→`get_settings()`
+# を呼ぶため，`TOKEN_SECRET` や `CAMPUS_IP_RANGES` の設定不備もこの時点で
+# 検出される（config.pyが本来意図している「起動時に検証する」動きに合わせ
+# られる）．
+create_tables()
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ------------------------------------------------------------- 画面ルート
+#
+# ここから下は画面（HTML）を返すルート．担当Cがマージした `/teacher/courses`
+# （このファイル末尾）と同じ書き方に揃える：認可は必ず `Depends` で宣言的に
+# 付け，if では書かない（screen-design.md「画面の出し分けは認可ではない」．
+# ボタンを隠しても直接URLを叩かれる前提で考える）．
+
+@app.get("/login")
+def login_page(request: Request):
+    """ログイン画面．ログイン前の画面なので誰でも見られる．"""
+    return templates.TemplateResponse(request=request, name="login.html", context={})
+
+
+@app.get("/")
+def index(request: Request, db: Session = Depends(get_db)):
+    """ルート．ロールで教員／学生の入口へ振り分け，未ログインなら /login へ．
+
+    `Depends(require_login)` を使わないのはここだけ意図的．require_login は
+    未ログイン時に401（JSON）を返すが，ここはブラウザの画面遷移なので
+    リダイレクトで応答したい．そのため `security.get_session_user` を直接呼ぶ．
+    """
+    user = security.get_session_user(db, request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        return RedirectResponse(url="/login")
+    if user.role == "teacher":
+        return RedirectResponse(url="/teacher/courses")
+    return RedirectResponse(url="/student")
+
+
+@app.get("/student")
+def student_home_view(
+    request: Request,
+    user: models.User = Depends(require_role("student")),
+):
+    """ログイン直後に学生が最初に見る画面."""
+    return templates.TemplateResponse(
+        request=request,
+        name="home.html",
+        context={"display_name": user.display_name},
+    )
+
+
+@app.get("/scan")
+def scan_page(
+    request: Request,
+    user: models.User = Depends(require_role("student")),
+):
+    """QRから遷移してくる読み取り画面（カメラアプリからの直接着地も含む）."""
+    return templates.TemplateResponse(
+        request=request,
+        name="scan.html",
+        context={"csrf_token": csrf_token_for_request(request)},
+    )
+
+
+@app.get("/history")
+def history_page(
+    request: Request,
+    user: models.User = Depends(require_role("student")),
+):
+    """自分の出席履歴画面．表示データは GET /me/attendances から取得する."""
+    return templates.TemplateResponse(request=request, name="history.html", context={})
 
 
 # ---------------------------------------------------------------- スキーマ
@@ -520,6 +605,32 @@ def close_attendance_session(
     return _to_session_response(sess)
 
 
+@app.get("/attendance-sessions/{attendance_session_id}/qr")
+def teacher_qr_view(
+    request: Request,
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    db: Session = Depends(get_db),
+):
+    """教員のQR投影画面（プロジェクター表示用）.
+
+    認可は `require_session_owner` のみに委ね，ここに追加の if は書かない
+    （token取得APIと同じ方針．api-design.md「認可チェックの書き方」）．
+    他の教員のセッションIDを指定された場合も `require_session_owner` が
+    404を返す（403にすると「そのIDのセッションは存在する」と分かってしまう
+    ため．api-design.mdのHTTPステータスの使い分け参照）．
+    """
+    course = db.get(models.Course, sess.course_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="teacher_qr.html",
+        context={
+            "session_id": sess.id,
+            "csrf_token": csrf_token_for_request(request),
+            "course_name": course.name if course is not None else None,
+        },
+    )
+
+
 # --------------------------------------------------------- 出席状況一覧（B-6）
 #
 # api-design.md「GET /attendance-sessions/{id}/attendances」に対応する．
@@ -608,6 +719,29 @@ def list_attendance_session_attendances(
             required_scan_count=sess.required_scan_count,
         ),
         rows=rows,
+    )
+
+
+@app.get("/attendance-sessions/{attendance_session_id}/attendances/view")
+def attendance_list_view(
+    request: Request,
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    db: Session = Depends(get_db),
+):
+    """教員の出席状況一覧画面．表示データは GET .../attendances から取得する.
+
+    QR画面（`teacher_qr_view`）と同じ理由で，認可は `require_session_owner`
+    のみに委ねる．他の教員のセッションIDには404を返す．
+    """
+    course = db.get(models.Course, sess.course_id)
+    return templates.TemplateResponse(
+        request=request,
+        name="attendance_list.html",
+        context={
+            "session_id": sess.id,
+            "csrf_token": csrf_token_for_request(request),
+            "course_name": course.name if course is not None else None,
+        },
     )
 
 
@@ -974,6 +1108,81 @@ def register_attendance(
         scan_seq=scan_seq,
         recorded_at=scanned_at,
     )
+
+
+# --------------------------------------------------------- 学生の出席履歴（D-8）
+#
+# api-design.md「学生の記録を読むAPIにIDを受け取らせない」（D-8）に対応する．
+# パス・クエリ・ボディのどこにも学生IDを持たせず，対象はログインセッションから
+# 決まる本人だけにする．`/students/{student_id}/attendances` のような形を
+# 作らなければ，他人の記録を覗く攻撃はそもそも成立しない．
+#
+# api-design.mdの認可欄は「要ログイン」であって「student」限定ではないため，
+# ここでは `require_role("student")` ではなく `require_login` を使う．
+
+class MyAttendanceRow(BaseModel):
+    course_name: str
+    scheduled_start_at: str
+    # 記録が無いセッション（未登録／欠席）は status / record_source が None
+    # になる．list_attendance_session_attendances の AttendanceRow と同じ考え方．
+    status: str | None
+    scan_count: int
+    record_source: str | None
+
+
+@app.get("/me/attendances", response_model=list[MyAttendanceRow])
+def list_my_attendances(
+    user: models.User = Depends(require_login),
+    db: Session = Depends(get_db),
+):
+    # 履修している授業の出席セッションだけを対象にする．
+    enrolled_course_ids = [
+        row[0]
+        for row in db.query(models.Enrollment.course_id)
+        .filter(models.Enrollment.user_id == user.id)
+        .all()
+    ]
+
+    # 記録が無いセッション（欠席／未登録）も「記録なし」の行として出す
+    # （screen-design.md S4の「第7回 記録なし」．欠席を「行が無いこと」で
+    # 表す設計と同じで，履修者名簿ではなくセッション側を起点に取得する）．
+    sessions = (
+        db.query(models.AttendanceSession, models.Course)
+        .join(models.Course, models.Course.id == models.AttendanceSession.course_id)
+        .filter(models.AttendanceSession.course_id.in_(enrolled_course_ids))
+        .order_by(models.AttendanceSession.scheduled_start_at.desc())
+        .all()
+    )
+
+    attendances_by_session = {
+        a.attendance_session_id: a
+        for a in db.query(models.Attendance)
+        .filter(models.Attendance.user_id == user.id)
+        .all()
+    }
+
+    scan_counts: dict[int, int] = {}
+    for (session_id,) in (
+        db.query(models.AttendanceScan.attendance_session_id)
+        .filter(models.AttendanceScan.user_id == user.id)
+        .all()
+    ):
+        scan_counts[session_id] = scan_counts.get(session_id, 0) + 1
+
+    rows: list[MyAttendanceRow] = []
+    for sess, course in sessions:
+        attendance = attendances_by_session.get(sess.id)
+        rows.append(
+            MyAttendanceRow(
+                course_name=course.name,
+                scheduled_start_at=sess.scheduled_start_at,
+                status=attendance.status if attendance is not None else None,
+                scan_count=scan_counts.get(sess.id, 0),
+                record_source=attendance.record_source if attendance is not None else None,
+            )
+        )
+
+    return rows
 
 
 # ------------------------------------------------------------ 教員の授業一覧
