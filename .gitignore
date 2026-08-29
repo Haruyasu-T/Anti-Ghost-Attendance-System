@@ -1,10 +1,27 @@
+# Python
 __pycache__/
 *.pyc
-*.db
+.pytest_cache/
+
+# 仮想環境
 venv/
 .venv/
 env/
+
+# 秘密の設定値
+# .env だけだと .env.local や .env.production が漏れるため .env.* も除外する。
+# ただし .env.example は共有したいテンプレートなので ! で除外を打ち消す。
+# 打ち消しは除外行より後に書かないと効かない。
 .env
-.pytest_cache/
+.env.*
+!.env.example
+
+# データベース
+# 学籍番号やパスワードハッシュが入る。拡張子は3種類とも塞ぐ。
+*.db
+*.sqlite
+*.sqlite3
+
+# エディタ
 .vscode/
 .idea/
