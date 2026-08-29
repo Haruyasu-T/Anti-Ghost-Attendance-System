@@ -120,6 +120,26 @@ class AttendanceListResponse(BaseModel):
     rows: list[AttendanceRow]
 
 
+class ManualCorrectionRequest(BaseModel):
+    status: str  # "present" | "late" | "absent"
+    reason: str
+
+
+class ManualCorrectionResponse(BaseModel):
+    attendance_session_id: int
+    user_id: int
+    status: str
+    record_source: str
+    before_status: str | None
+    corrected_at: str
+
+
+# attendances.status の CHECK 制約と一致させる．ここで弾かずに models.py の
+# CHECK 制約に頼ると IntegrityError（500 になりかねない）に流れてしまうため，
+# アプリ側で先に検証する．
+_VALID_ATTENDANCE_STATUSES = ("present", "late", "absent")
+
+
 def _to_session_response(sess: models.AttendanceSession) -> AttendanceSessionResponse:
     return AttendanceSessionResponse(
         id=sess.id,
@@ -574,6 +594,139 @@ def list_attendance_session_attendances(
             required_scan_count=sess.required_scan_count,
         ),
         rows=rows,
+    )
+
+
+# --------------------------------------------------------- 手動修正API（B-7）
+#
+# api-design.md「PUT /attendance-sessions/{attendance_session_id}/attendances/{user_id}」
+# に対応する．decisions.md D-15の通り，記録があれば更新・無ければ作成を同じ
+# 形で扱う（当初の PATCH /attendances/{id} 案は新規記録を作れず破綻していた）．
+#
+# パスに user_id を受け取るが，D-8（学生の記録を読むAPIにIDを受け取らせない）
+# とは矛盾しない．D-8は学生が自分の記録を読む経路の話で，こちらは教員が対象を
+# 指定する操作なのでIDの指定が機能そのものに必要．認可は require_session_owner
+# （そのセッションの授業を担当しているか）で担保する．
+
+@app.put(
+    "/attendance-sessions/{attendance_session_id}/attendances/{user_id}",
+    response_model=ManualCorrectionResponse,
+)
+def correct_attendance(
+    user_id: int,
+    payload: ManualCorrectionRequest,
+    request: Request,
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    db: Session = Depends(get_db),
+):
+    # reason は必須．空文字やスペースだけは400で拒否する（api-design.md）．
+    # 手動修正は出席記録を書き換えられる特権操作なので，理由の入力自体を
+    # 抑止として機能させる（requirements.md）．
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="理由を入力してください"
+        )
+
+    if payload.status not in _VALID_ATTENDANCE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="status は present / late / absent のいずれかにしてください",
+        )
+
+    # 対象の学生がこの授業を履修しているか確認する（未履修なら400．api-design.md）．
+    # Enrollment.user_id は users.id への外部キーなので，この行が取れれば
+    # 対象ユーザーの実在も同時に保証される．
+    enrolled = (
+        db.query(models.Enrollment)
+        .filter(
+            models.Enrollment.course_id == sess.course_id,
+            models.Enrollment.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    if enrolled is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="この授業の履修者ではありません",
+        )
+
+    client_ip = security.get_client_ip(request)
+    now = datetime.now(timezone.utc)
+
+    existing = (
+        db.query(models.Attendance)
+        .filter(
+            models.Attendance.attendance_session_id == sess.id,
+            models.Attendance.user_id == user_id,
+        )
+        .one_or_none()
+    )
+    # before_status は，記録が無かった場合はNULL（api-design.md）．
+    before_status = existing.status if existing is not None else None
+
+    if existing is not None:
+        existing.status = payload.status
+        existing.record_source = "manual"
+    else:
+        # 新規追加のパス．一意制約 (attendance_session_id, user_id) は
+        # 上のクエリで既存行が無いことを確認済みなので通常は衝突しないが，
+        # 同時に2つの修正リクエストが来た場合の競合はここでは扱っていない
+        # （単一の教員が操作する運用を前提にした割り切り．正直に限界として
+        # 書いておく）．
+        existing = models.Attendance(
+            attendance_session_id=sess.id,
+            user_id=user_id,
+            status=payload.status,
+            record_source="manual",
+            first_recorded_at=security.to_iso(now),
+        )
+        db.add(existing)
+
+    corrected_at = security.to_iso(now)
+
+    # manual_corrections への記録と attendances の更新を同一トランザクションに
+    # する（phase3-tasks.md B-7）．sess.created_by をteacher_idに使うのは
+    # 他の教員向けエンドポイント（rescan等）と同じ考え方：require_session_owner
+    # を通った時点でログイン中の教員がそのセッションの担当（＝作成者）だと
+    # 確認済みなので，別途 Depends(require_login) で取り直す必要が無い．
+    db.add(
+        models.ManualCorrection(
+            attendance_session_id=sess.id,
+            target_user_id=user_id,
+            teacher_id=sess.created_by,
+            before_status=before_status,
+            after_status=payload.status,
+            reason=reason,
+            client_ip=client_ip,
+            corrected_at=corrected_at,
+        )
+    )
+
+    # audit_logs にも action="manual_correction" として残す（db-design.md の
+    # action一覧に明記されている）．manual_corrections が変更前後の値を持つ
+    # 一次記録で，こちらは他のセキュリティイベントと横断的に検索するための
+    # 二次記録という位置づけ．同じ db（トランザクション）に書くことで，
+    # 書き込みが失敗したら修正自体がロールバックされる
+    # （security-interface.md「呼び出す側の責任」）．
+    security.write_audit_log(
+        db,
+        action="manual_correction",
+        result="success",
+        actor_user_id=sess.created_by,
+        client_ip=client_ip,
+        target_type="attendance_session",
+        target_id=sess.id,
+        detail=f"target_user_id={user_id} before={before_status} after={payload.status}",
+    )
+
+    return ManualCorrectionResponse(
+        attendance_session_id=sess.id,
+        user_id=user_id,
+        status=payload.status,
+        record_source="manual",
+        before_status=before_status,
+        corrected_at=corrected_at,
     )
 
 
