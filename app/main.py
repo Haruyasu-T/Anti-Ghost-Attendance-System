@@ -23,18 +23,28 @@ api-design.md の「認証」セクションに対応する3エンドポイン�
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app import security
-from app.auth import SESSION_COOKIE, require_login
+from app.auth import (
+    SESSION_COOKIE,
+    csrf_token_for_request,
+    require_login,
+    require_role,
+)
 from app.db import get_db, get_session_factory
-from app.models import User
+from app.models import Course, User
 from app.auth import CsrfMiddleware
 
 
 app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム")
 app.add_middleware(CsrfMiddleware)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
+require_teacher = require_role("teacher")
 
 
 @app.get("/health")
@@ -53,6 +63,11 @@ class MeResponse(BaseModel):
     login_id: str
     role: str
     display_name: str
+
+
+class CourseResponse(BaseModel):
+    id: int
+    name: str
 
 
 # -------------------------------------------------------------- エンドポイント
@@ -148,4 +163,34 @@ def me(user: User = Depends(require_login)):
         login_id=user.login_id,
         role=user.role,
         display_name=user.display_name,
+    )
+
+
+@app.get("/courses", response_model=list[CourseResponse])
+def list_courses(
+    user: User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    """Return only courses assigned to the signed-in teacher."""
+    return (
+        db.query(Course)
+        .filter(Course.teacher_id == user.id)
+        .order_by(Course.name, Course.id)
+        .all()
+    )
+
+
+@app.get("/teacher/courses")
+def teacher_courses_view(
+    request: Request,
+    user: User = Depends(require_teacher),
+):
+    """Teacher landing page shown immediately after login."""
+    return templates.TemplateResponse(
+        request=request,
+        name="teacher_courses.html",
+        context={
+            "display_name": user.display_name,
+            "csrf_token": csrf_token_for_request(request),
+        },
     )
