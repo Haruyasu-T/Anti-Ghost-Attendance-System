@@ -430,6 +430,17 @@ fetch("/attendances", { method: "POST", credentials: "same-origin",
   headers: { "X-CSRF-Token": shell.dataset.csrfToken } })
 ```
 
+### 時刻の変換
+
+```python
+def to_iso(dt: datetime) -> str: ...      # DBに入れる形式に変換
+def from_iso(value: str) -> datetime: ... # DBから読んだ値をdatetimeに戻す
+```
+
+`main.py` 側でも時刻の変換が必要になるので公開している．自前で `strftime` を書かず，必ずこれを通すこと（書式が揃わないと範囲検索が壊れる．後述）．
+
+**`from_iso` はDBから読んだ値の変換に使う関数であって，クライアント入力の検証には使わない．** タイムゾーンが無ければ黙ってUTCとみなすので，フロントがJST→UTCの変換を忘れて送ってきた場合に気付けない．クライアント入力はタイムゾーンの有無まで呼び出し側で明示的に弾くこと（④クライアントを信用しない）．
+
 ## 時刻の書式
 
 DBに入れる時刻は **"YYYY-MM-DDTHH:MM:SS.mmmZ"（ミリ秒3桁・24文字固定）** に統一する．
