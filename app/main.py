@@ -166,6 +166,13 @@ def login(
         # このあと例外でロールバックする経路なので，`db`（呼び出し側のトランザクション）
         # に監査ログを書いても一緒に消える．write_audit_log_now で独立したトランザクション
         # に書く（security-interface.md）．
+        #
+        # 先に db.rollback() しておく．本来ここまでの db は読み取りだけなので今は
+        # 問題にならないが，別コネクションで書き込む write_audit_log_now と
+        # db 側の未コミット状態が重なると "database is locked"（書き込みロックの
+        # 循環待ち）になり得る（register_attendance の _reject_now で実際に踏んだ）．
+        # 呼び出し順を安全側に倒しておく．
+        db.rollback()
         security.write_audit_log_now(
             get_session_factory(),
             action="login",
@@ -443,3 +450,222 @@ def close_attendance_session(
     )
 
     return _to_session_response(sess)
+
+
+# ------------------------------------------------------- 出席登録（B-5・核心）
+#
+# api-design.md「POST /attendances（出席登録）」の検証順序をそのままの順で
+# 実装する．IP検証をトークン検証より前に置くのは意図的（D-5：学外からの
+# 試行にトークンの有効性を漏らさないため）．
+#
+# 実装時点で次の3点が未確定・未実装のまま残っている（担当Aと要確認）：
+#   #3  CSRF検証 … 発行方法が security-interface.md 側で未確定のため todo
+#   #7  「期限切れ」と「不正」の区別 … security.verify_token の公開契約は
+#       bool のみなので区別できない．今は「無効なQRです」に統一している
+#   #10 device_id の発行元 … login 時に（未発行なら）発行するようにした
+#       （このファイル内 /auth/login 参照）
+
+class AttendanceRegisterRequest(BaseModel):
+    attendance_session_id: int
+    token: str
+
+
+class AttendanceRegisterResponse(BaseModel):
+    status: str  # "present" | "late"
+    scan_seq: int
+    recorded_at: str
+
+
+@app.post("/attendances", response_model=AttendanceRegisterResponse)
+def register_attendance(
+    payload: AttendanceRegisterRequest,
+    request: Request,
+    user: models.User = Depends(require_role("student")),
+    db: Session = Depends(get_db),
+):
+    # todo: #3 CSRFトークンの検証．login側の発行が未確定のため未実装．
+    # 発行方式が決まり次第，ここに require_csrf 相当のチェックを先頭で入れる．
+
+    client_ip = security.get_client_ip(request)
+    device_id = request.cookies.get(DEVICE_COOKIE)
+
+    def _reject_now(status_code: int, detail: str, log_detail: str, **log_extra) -> HTTPException:
+        # require_login が触った last_used_at の更新など，db 側に未コミットの
+        # 書き込みが残っていることがある（autoflushでSQLiteに書き込み済みだが
+        # 未コミット＝書き込みロックを保持したまま）．write_audit_log_now は
+        # 別コネクションで書き込むため，先に db 側のロックを手放しておかないと
+        # 「write_audit_log_now が終わるまで db は解放されない／db が解放される
+        # まで write_audit_log_now が書けない」という循環待ちで
+        # "database is locked" になる．ここまでの経路では db.add() をまだ
+        # 呼んでいないので，rollback で失うものはない．
+        db.rollback()
+        security.write_audit_log_now(
+            get_session_factory(),
+            action="attendance_register",
+            result="failure",
+            actor_user_id=user.id,
+            client_ip=client_ip,
+            device_id=device_id,
+            detail=log_detail,
+            **log_extra,
+        )
+        return HTTPException(status_code=status_code, detail=detail)
+
+    # 4. IP検証．トークン検証より先に行う（D-5）．
+    if not security.is_campus_ip(client_ip):
+        raise _reject_now(
+            status.HTTP_403_FORBIDDEN, "学内ネットワークからアクセスしてください", "off_campus"
+        )
+
+    # 5. セッションの存在・状態
+    sess = db.get(models.AttendanceSession, payload.attendance_session_id)
+    if sess is None:
+        raise _reject_now(
+            status.HTTP_404_NOT_FOUND, "見つかりません", "session_not_found",
+            target_type="attendance_session", target_id=payload.attendance_session_id,
+        )
+    if sess.status != "open":
+        raise _reject_now(
+            status.HTTP_409_CONFLICT, "このセッションは終了しています", "session_closed",
+            target_type="attendance_session", target_id=sess.id,
+        )
+
+    # 6. 履修確認
+    enrolled = (
+        db.query(models.Enrollment)
+        .filter(
+            models.Enrollment.course_id == sess.course_id,
+            models.Enrollment.user_id == user.id,
+        )
+        .one_or_none()
+    )
+    if enrolled is None:
+        raise _reject_now(
+            status.HTTP_403_FORBIDDEN, "この授業の履修者ではありません", "not_enrolled",
+            target_type="attendance_session", target_id=sess.id,
+        )
+
+    # 7. トークン検証．期限切れと不正の区別はしない（上記の理由により）．
+    if not security.verify_token(sess.id, sess.token_salt, payload.token):
+        raise _reject_now(
+            status.HTTP_403_FORBIDDEN, "無効なQRです", "invalid_token",
+            target_type="attendance_session", target_id=sess.id,
+        )
+
+    # 8. 何回目の読み取りか
+    scan_seq = (
+        db.query(models.AttendanceScan)
+        .filter(
+            models.AttendanceScan.attendance_session_id == sess.id,
+            models.AttendanceScan.user_id == user.id,
+        )
+        .count()
+        + 1
+    )
+    if scan_seq > sess.required_scan_count:
+        raise _reject_now(
+            status.HTTP_409_CONFLICT,
+            "この回の出席は既に登録されています",
+            "already_registered",
+            target_type="attendance_session", target_id=sess.id,
+        )
+
+    now = datetime.now(timezone.utc)
+
+    # 9. 受付時間帯の判定は1回目のみ．2回目以降は在室確認なので見ない．
+    if scan_seq == 1:
+        scheduled_start_at = security.from_iso(sess.scheduled_start_at)
+        classified = security.classify_attendance(scheduled_start_at, now)
+        if classified is None:
+            raise _reject_now(
+                status.HTTP_403_FORBIDDEN, "受付時間を過ぎています", "outside_window",
+                target_type="attendance_session", target_id=sess.id,
+            )
+        attendance_status = classified.value
+    else:
+        existing = (
+            db.query(models.Attendance)
+            .filter(
+                models.Attendance.attendance_session_id == sess.id,
+                models.Attendance.user_id == user.id,
+            )
+            .one_or_none()
+        )
+        if existing is None:
+            # scan_seq>1 に到達しているのに1回目の記録が無いのは整合性が
+            # 崩れている状態．判定できないなら拒否する（⑤安全なデフォルト）．
+            raise _reject_now(
+                status.HTTP_409_CONFLICT,
+                "出席記録の状態を確認できません",
+                "inconsistent_state",
+                target_type="attendance_session", target_id=sess.id,
+            )
+        attendance_status = existing.status
+
+    # 10. 端末の紐付け確認．ブロックしない．検知して記録するだけ（D-11）．
+    if device_id:
+        conflict = security.check_device_binding(db, device_id, user.id)
+        if conflict == security.DeviceCheckResult.CONFLICT:
+            security.write_audit_log(
+                db,
+                action="device_conflict",
+                result="success",
+                actor_user_id=user.id,
+                client_ip=client_ip,
+                device_id=device_id,
+                target_type="attendance_session",
+                target_id=sess.id,
+            )
+
+    # 11. 記録．一意制約違反は409に変換する．
+    scanned_at = security.to_iso(now)
+    db.add(
+        models.AttendanceScan(
+            attendance_session_id=sess.id,
+            user_id=user.id,
+            scan_seq=scan_seq,
+            scanned_at=scanned_at,
+            client_ip=client_ip,
+            device_id=device_id,
+        )
+    )
+    if scan_seq == 1:
+        db.add(
+            models.Attendance(
+                attendance_session_id=sess.id,
+                user_id=user.id,
+                status=attendance_status,
+                record_source="auto",
+                first_recorded_at=scanned_at,
+            )
+        )
+
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise _reject_now(
+            status.HTTP_409_CONFLICT,
+            "この回の出席は既に登録されています",
+            "duplicate_scan",
+            target_type="attendance_session", target_id=sess.id,
+        )
+
+    # 12. 監査ログ（成功）．本体の記録と同じトランザクションに書く．
+    security.write_audit_log(
+        db,
+        action="attendance_register",
+        result="success",
+        actor_user_id=user.id,
+        client_ip=client_ip,
+        device_id=device_id,
+        target_type="attendance_session",
+        target_id=sess.id,
+        detail=f"scan_seq={scan_seq}",
+    )
+
+    return AttendanceRegisterResponse(
+        status=attendance_status,
+        scan_seq=scan_seq,
+        recorded_at=scanned_at,
+    )
