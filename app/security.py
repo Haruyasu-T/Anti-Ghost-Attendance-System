@@ -313,7 +313,7 @@ def _sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _to_iso(dt: datetime) -> str:
+def to_iso(dt: datetime) -> str:
     """DBに入れる形式（UTCのISO 8601・ミリ秒3桁の固定長）に変換する.
 
     "2026-08-22T10:00:00.123Z" のように**必ず24文字**になる．
@@ -330,12 +330,25 @@ def _to_iso(dt: datetime) -> str:
     return f"{dt.strftime('%Y-%m-%dT%H:%M:%S')}.{dt.microsecond // 1000:03d}Z"
 
 
-def _from_iso(value: str) -> datetime:
-    """DBから読んだISO 8601文字列をawareなdatetimeにする."""
+def from_iso(value: str) -> datetime:
+    """DBから読んだISO 8601文字列をawareなdatetimeにする.
+
+    **DBから読んだ値の変換に使う関数**であって，クライアント入力の検証には
+    使わない．タイムゾーンが無ければ黙ってUTCとみなすので，フロントが
+    JST→UTCの変換を忘れて送ってきた場合に気付けない．クライアント入力は
+    呼び出し側でタイムゾーンの有無まで明示的に検証すること．
+    """
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+# 当初は内部用のつもりでアンダースコア付きにしていたが，`main.py` 側でも
+# 時刻の変換が必要になったため公開名にした．テストが旧名を参照しているので
+# 別名も残す（次に触るときに整理してよい）．
+_to_iso = to_iso
+_from_iso = from_iso
 
 
 # ============================================== A-6. ログインセッション
@@ -366,9 +379,9 @@ def create_login_session(
         models.LoginSession(
             id_hash=_sha256_hex(raw_id),
             user_id=user_id,
-            created_at=_to_iso(now),
-            last_used_at=_to_iso(now),
-            expires_at=_to_iso(now + lifetime),
+            created_at=to_iso(now),
+            last_used_at=to_iso(now),
+            expires_at=to_iso(now + lifetime),
             client_ip=client_ip,
             user_agent=user_agent,
         )
@@ -389,10 +402,10 @@ def get_session_user(db, session_id: str | None):
         return None
     if row.revoked_at is not None:
         return None
-    if _from_iso(row.expires_at) <= _utcnow():
+    if from_iso(row.expires_at) <= _utcnow():
         return None
 
-    row.last_used_at = _to_iso(_utcnow())
+    row.last_used_at = to_iso(_utcnow())
     return db.get(models.User, row.user_id)
 
 
@@ -405,7 +418,7 @@ def revoke_login_session(db, session_id: str | None) -> None:
 
     row = db.get(models.LoginSession, _sha256_hex(session_id))
     if row is not None and row.revoked_at is None:
-        row.revoked_at = _to_iso(_utcnow())
+        row.revoked_at = to_iso(_utcnow())
 
 
 def revoke_all_sessions_for_user(db, user_id: int) -> int:
@@ -417,7 +430,7 @@ def revoke_all_sessions_for_user(db, user_id: int) -> int:
     """
     from app import models
 
-    now = _to_iso(_utcnow())
+    now = to_iso(_utcnow())
     rows = (
         db.query(models.LoginSession)
         .filter(
@@ -517,7 +530,7 @@ def write_audit_log(
 
     db.add(
         models.AuditLog(
-            occurred_at=_to_iso(_utcnow()),
+            occurred_at=to_iso(_utcnow()),
             action=action,
             result=result,
             actor_user_id=actor_user_id,
@@ -578,7 +591,7 @@ def check_device_binding(db, device_id: str | None, user_id: int) -> DeviceCheck
     if not device_id:
         return DeviceCheckResult.OK
 
-    now = _to_iso(_utcnow())
+    now = to_iso(_utcnow())
     binding = db.get(models.DeviceBinding, device_id)
 
     if binding is None:
@@ -623,7 +636,7 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
     lookback = timedelta(
         minutes=settings.login_window_minutes + settings.login_lockout_minutes
     )
-    since = _to_iso(now - lookback)
+    since = to_iso(now - lookback)
 
     def _locked_by(column, value) -> bool:
         if not value:
@@ -644,13 +657,13 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
         if not times:
             return False
 
-        last_failure = max(_from_iso(t) for t in times)
+        last_failure = max(from_iso(t) for t in times)
         if now - last_failure >= timedelta(minutes=settings.login_lockout_minutes):
             return False  # ロック期間を過ぎている
 
         # 最後の失敗から遡って window 分の失敗を数える
         window_start = last_failure - timedelta(minutes=settings.login_window_minutes)
-        recent = [t for t in times if _from_iso(t) >= window_start]
+        recent = [t for t in times if from_iso(t) >= window_start]
         return len(recent) >= settings.login_max_failures
 
     return (
@@ -682,7 +695,7 @@ def detect_burst(
     from app import models
 
     settings = get_settings()
-    since = _to_iso(_utcnow() - timedelta(seconds=settings.burst_window_seconds))
+    since = to_iso(_utcnow() - timedelta(seconds=settings.burst_window_seconds))
 
     def _distinct_users(column, value) -> int:
         if not value:
