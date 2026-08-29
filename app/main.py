@@ -736,15 +736,18 @@ def correct_attendance(
 # 実装する．IP検証をトークン検証より前に置くのは意図的（D-5：学外からの
 # 試行にトークンの有効性を漏らさないため）．
 #
-# 実装時点で次の点が未解決のまま残っている（担当Aと要確認）：
-#   #7  「期限切れ」と「不正」の区別 … security.verify_token の公開契約は
-#       bool のみなので区別できない．今は「無効なQRです」に統一している
-#
-# 解消済み：
+# 実装済み・解消済み：
 #   #3  CSRF検証 … CsrfMiddleware を app に登録し，POST /attendances を含む
 #       状態変更系リクエスト全体に適用済み（このファイル冒頭の
 #       app.add_middleware(CsrfMiddleware) 参照）．エンドポイント個別の
 #       チェックは書かない方針のまま
+#   #7  「期限切れ」と「不正」の区別 … security.classify_token が
+#       TokenCheck（VALID/EXPIRED/INVALID）を返すようになったため，
+#       監査ログのdetailはこの2つを区別して記録している．
+#       **ただし学生に見せるメッセージは区別しない**（decisions.md D-16／
+#       TokenCheckのdocstring）．区別して見せると，偽造したトークンが
+#       形式として正しかったかを攻撃者が探る手がかり（オラクル）になる
+#       ため．どちらも「無効なQRです」のまま統一している
 #   #10 device_id の発行元 … login 時に（未発行なら）発行するようにした
 #       （このファイル内 /auth/login 参照）
 
@@ -830,11 +833,17 @@ def register_attendance(
         )
 
     # 7. トークン検証．期限切れと不正の区別はしない（上記の理由により）．
-    if not security.verify_token(sess.id, sess.token_salt, payload.token):
-        raise _reject_now(
-            status.HTTP_403_FORBIDDEN, "無効なQRです", "invalid_token",
-            target_type="attendance_session", target_id=sess.id,
+    result = security.classify_token(sess.id, sess.token_salt, payload.token)
+    if result is not security.TokenCheck.VALID:
+        security.write_audit_log_now(
+            get_session_factory(),
+            action="attendance_register",
+            result="failure",
+            actor_user_id=user.id,
+            client_ip=client_ip,
+            detail=result.value,
         )
+        raise HTTPException(403, "QRを読み取れませんでした。もう一度読み取ってください")
 
     # 8. 何回目の読み取りか
     scan_seq = (
