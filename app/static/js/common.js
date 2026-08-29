@@ -1,8 +1,16 @@
 "use strict";
-document.querySelectorAll("[data-logout]").forEach(function(button) {
- button.addEventListener("click", async function() {
-  button.disabled=true;
-  try { await fetch("/auth/logout",{method:"POST",credentials:"same-origin"}); }
-  finally { window.location.assign("/"); }
- });
+
+document.querySelectorAll("[data-logout]").forEach((button) => {
+    button.addEventListener("click", async () => {
+        button.disabled = true;
+        try {
+            await fetch("/auth/logout", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {"X-CSRF-Token": button.dataset.csrfToken},
+            });
+        } finally {
+            window.location.assign("/login");
+        }
+    });
 });
