@@ -5,9 +5,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app import security
 from app.db import get_db
 from app.main import app, require_teacher
-from app.models import Base, Course
+from app.models import Base, Course, User
 
 
 def _test_session():
@@ -64,3 +65,29 @@ def test_teacher_courses_requires_login():
     response = TestClient(app).get("/teacher/courses")
 
     assert response.status_code == 401
+
+
+def test_student_cannot_access_courses():
+    db = _test_session()
+    db.add(User(
+        login_id="S0001",
+        role="student",
+        display_name="学生",
+        password_hash=security.hash_password("student-password"),
+    ))
+    db.commit()
+
+    app.dependency_overrides[get_db] = lambda: db
+    client = TestClient(app, base_url="https://testserver")
+    try:
+        login_response = client.post(
+            "/auth/login",
+            json={"login_id": "S0001", "password": "student-password"},
+        )
+        response = client.get("/courses")
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+    assert login_response.status_code == 200
+    assert response.status_code == 403
