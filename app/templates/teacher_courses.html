@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}担当授業 | 出席管理システム{% endblock %}
+{% block header_actions %}
+<button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
+{% endblock %}
+{% block content %}
+<section data-teacher-courses>
+    <div class="page-heading">
+        <p class="eyebrow">教員メニュー</p>
+        <h1>担当授業</h1>
+        {% if display_name %}<p class="muted">{{ display_name }}さんの担当授業だけを表示しています。</p>{% endif %}
+    </div>
+    <div id="courses-error" class="alert alert-error" role="alert" hidden></div>
+    <div id="courses-list" class="action-grid" aria-live="polite" aria-busy="true">
+        <p class="muted">授業を読み込んでいます…</p>
+    </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
+<script src="{{ url_for('static', path='js/teacher-courses.js') }}" defer></script>
+{% endblock %}

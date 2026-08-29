@@ -25,6 +25,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -34,6 +36,7 @@ from app.auth import (
     DEVICE_COOKIE,
     SESSION_COOKIE,
     CsrfMiddleware,
+    csrf_token_for_request,
     require_course_owner,
     require_login,
     require_role,
@@ -57,6 +60,12 @@ app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム")
 # 足しても自動的に守られる状態にしておく（security-interface.md 参照）．
 app.add_middleware(CsrfMiddleware)
 
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+templates = Jinja2Templates(directory="app/templates")
+
+# 画面ルートでも使うので、依存関数をここで1つ作って共有する．
+require_teacher = require_role("teacher")
+
 
 @app.get("/health")
 def health():
@@ -74,6 +83,11 @@ class MeResponse(BaseModel):
     login_id: str
     role: str
     display_name: str
+
+
+class CourseResponse(BaseModel):
+    id: int
+    name: str
 
 
 class StartSessionRequest(BaseModel):
@@ -959,4 +973,38 @@ def register_attendance(
         status=attendance_status,
         scan_seq=scan_seq,
         recorded_at=scanned_at,
+    )
+
+
+# ------------------------------------------------------------ 教員の授業一覧
+#
+# 一覧は「ログイン中の教員が担当する授業」だけを返す．授業IDを受け取って
+# 絞り込む形にすると，他人のIDを入れられたときの防御が呼び出し側頼みになる．
+
+@app.get("/courses", response_model=list[CourseResponse])
+def list_courses(
+    user: models.User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    return (
+        db.query(models.Course)
+        .filter(models.Course.teacher_id == user.id)
+        .order_by(models.Course.name, models.Course.id)
+        .all()
+    )
+
+
+@app.get("/teacher/courses")
+def teacher_courses_view(
+    request: Request,
+    user: models.User = Depends(require_teacher),
+):
+    """ログイン直後に教員が最初に見る画面."""
+    return templates.TemplateResponse(
+        request=request,
+        name="teacher_courses.html",
+        context={
+            "display_name": user.display_name,
+            "csrf_token": csrf_token_for_request(request),
+        },
     )
