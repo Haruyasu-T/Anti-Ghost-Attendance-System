@@ -806,6 +806,164 @@ def list_attendance_session_attendances(
     )
 
 
+# ------------------------------------------------------------ アラート（B-8）
+#
+# 端末の重複とバーストを教員に見せる．出席状況一覧（上）とは別のエンドポイント
+# にして，画面側で user_id をキーにマージする（screen-design.md S7 のアラート欄）．
+# 分けている理由は，こちらが audit_logs / attendance_scans を横断して数える
+# 重い処理で，一覧の表示を待たせたくないため．
+#
+# **検知するだけで，ブロックも自動欠席もしない（decisions.md D-11）．**
+# device_id はCookieなので削除やシークレットモードで簡単に回避できる．
+# 回避できる仕組みをブロックの根拠にすると，端末を買い替えた正当な利用者を
+# 弾く一方で，本気の攻撃者は素通りする．判断は教員に委ねる．
+
+ALERT_DEVICE_SHARED = "同じ端末で複数アカウント"
+ALERT_DEVICE_BOUND_TO_OTHER = "別アカウントに紐付いた端末"
+ALERT_BURST = "短時間に同じ端末から複数人"
+
+
+class AlertRow(BaseModel):
+    user_id: int
+    login_id: str
+    display_name: str
+    alerts: list[str]
+
+
+class AlertListResponse(BaseModel):
+    rows: list[AlertRow]
+
+
+def _device_label(index: int) -> str:
+    """端末を画面上で見分けるためのラベル．
+
+    **生の `device_id` は返さない．** 認証情報ではないが，HttpOnlyのCookieで
+    配っている値をわざわざ画面に出す理由がない．教員に必要なのは「この2人が
+    同じ端末だった」と分かることで，値そのものではない．このセッション内で
+    通し番号を振れば足りる．
+    """
+    return f"端末{index}"
+
+
+def _burst_device_ids(
+    scans: list[models.AttendanceScan], threshold: int, window_seconds: int
+) -> set[str]:
+    """バーストが起きた端末を返す．
+
+    数えるのは**登録件数ではなく人数**（重複しない `user_id`）．1人が1回目と
+    2回目を読むのは正常なので，件数で数えると誤検知になる（security.py の
+    detect_burst と同じ考え方）．
+
+    detect_burst は登録の瞬間に「直近の窓」を見るが，こちらは授業が終わった
+    後から見るので，窓を時間軸上で滑らせて一度でも閾値に達したかを調べる．
+    """
+    by_device: dict[str, list[tuple[datetime, int]]] = {}
+    for scan in scans:
+        if not scan.device_id:
+            continue
+        by_device.setdefault(scan.device_id, []).append(
+            (security.from_iso(scan.scanned_at), scan.user_id)
+        )
+
+    burst: set[str] = set()
+    for device_id, entries in by_device.items():
+        entries.sort()
+        left = 0
+        for right in range(len(entries)):
+            while (entries[right][0] - entries[left][0]).total_seconds() > window_seconds:
+                left += 1
+            if len({user_id for _, user_id in entries[left:right + 1]}) >= threshold:
+                burst.add(device_id)
+                break
+    return burst
+
+
+@app.get(
+    "/attendance-sessions/{attendance_session_id}/alerts",
+    response_model=AlertListResponse,
+)
+def list_attendance_session_alerts(
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    db: Session = Depends(get_db),
+):
+    settings = get_settings()
+
+    scans = (
+        db.query(models.AttendanceScan)
+        .filter(models.AttendanceScan.attendance_session_id == sess.id)
+        .order_by(models.AttendanceScan.scanned_at, models.AttendanceScan.id)
+        .all()
+    )
+
+    # 端末ごとに，その端末で登録した利用者を集める．登場順に通し番号を振るので，
+    # 同じ一覧を二度開いてもラベルの並びが変わらない．
+    users_by_device: dict[str, set[int]] = {}
+    device_order: list[str] = []
+    for scan in scans:
+        if not scan.device_id:
+            continue
+        if scan.device_id not in users_by_device:
+            users_by_device[scan.device_id] = set()
+            device_order.append(scan.device_id)
+        users_by_device[scan.device_id].add(scan.user_id)
+
+    labels = {device_id: _device_label(i + 1) for i, device_id in enumerate(device_order)}
+    burst_devices = _burst_device_ids(
+        scans, settings.burst_threshold_count, settings.burst_window_seconds
+    )
+
+    alerts_by_user: dict[int, list[str]] = {}
+
+    def _add(user_id: int, message: str) -> None:
+        messages = alerts_by_user.setdefault(user_id, [])
+        if message not in messages:
+            messages.append(message)
+
+    for device_id, user_ids in users_by_device.items():
+        label = labels[device_id]
+        if len(user_ids) > 1:
+            for user_id in user_ids:
+                _add(user_id, f"{ALERT_DEVICE_SHARED}（{label}）")
+        if device_id in burst_devices:
+            for user_id in user_ids:
+                _add(user_id, f"{ALERT_BURST}（{label}）")
+
+    # 登録時に検知した紐付けの衝突（A-9）．こちらは授業を跨いだ話なので，
+    # このセッションの scans だけを見ても分からない．監査ログが唯一の記録．
+    for row in (
+        db.query(models.AuditLog)
+        .filter(
+            models.AuditLog.action == "device_conflict",
+            models.AuditLog.target_type == "attendance_session",
+            models.AuditLog.target_id == sess.id,
+        )
+        .all()
+    ):
+        if row.actor_user_id is not None:
+            _add(row.actor_user_id, ALERT_DEVICE_BOUND_TO_OTHER)
+
+    if not alerts_by_user:
+        return AlertListResponse(rows=[])
+
+    users = (
+        db.query(models.User)
+        .filter(models.User.id.in_(alerts_by_user.keys()))
+        .order_by(models.User.login_id)
+        .all()
+    )
+    return AlertListResponse(
+        rows=[
+            AlertRow(
+                user_id=user.id,
+                login_id=user.login_id,
+                display_name=user.display_name,
+                alerts=alerts_by_user[user.id],
+            )
+            for user in users
+        ]
+    )
+
+
 @app.get("/attendance-sessions/{attendance_session_id}/attendances/view")
 def attendance_list_view(
     request: Request,
