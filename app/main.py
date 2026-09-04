@@ -245,6 +245,12 @@ class AttendanceSessionSummary(BaseModel):
 
 
 class AttendanceRow(BaseModel):
+    # 手動修正の宛先（PUT .../attendances/{user_id}）に使う．これが無いと
+    # 画面の「修正」ボタンが宛先を持てず，手動修正API（B-7）を一度も呼べない．
+    # この一覧は担当教員しか開けず，login_id（学籍番号）も既に返しているので，
+    # 内部IDを足しても露出する情報は増えない．
+    # 学生向けの /me/attendances には引き続きIDを一切載せない（D-13）．
+    user_id: int
     login_id: str
     display_name: str
     # 未登録者は status / record_source が None になる（api-design.md の例の
@@ -780,6 +786,7 @@ def list_attendance_session_attendances(
         # マージする前提（screen-design.md S7の「アラート」欄）．
         rows.append(
             AttendanceRow(
+                user_id=user.id,
                 login_id=user.login_id,
                 display_name=user.display_name,
                 status=attendance.status if attendance is not None else None,
