@@ -4,7 +4,13 @@
 <button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
 {% endblock %}
 {% block content %}
-<section data-teacher-courses>
+{# 受付時間帯の分数はサーバーから受け取る．JSに直書きすると .env で値を
+   変えたときに表示だけが古くなり，教員が見ている時間帯と実際の判定がずれる． #}
+<section data-teacher-courses
+         data-csrf-token="{{ csrf_token }}"
+         data-present-before-minutes="{{ present_before_minutes }}"
+         data-present-after-minutes="{{ present_after_minutes }}"
+         data-late-until-minutes="{{ late_until_minutes }}">
     <div class="page-heading">
         <p class="eyebrow">教員メニュー</p>
         <h1>担当授業</h1>
