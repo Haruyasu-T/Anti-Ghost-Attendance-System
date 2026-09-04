@@ -518,6 +518,41 @@ def start_attendance_session(
 
 
 @app.get(
+    "/courses/{course_id}/attendance-sessions",
+    response_model=list[AttendanceSessionResponse],
+)
+def list_course_attendance_sessions(
+    course: models.Course = Depends(require_course_owner),
+    db: Session = Depends(get_db),
+):
+    """その授業の出席セッションを新しい順に返す（screen-design.md S5）．
+
+    授業一覧の画面が「開催中の回があるか」を判断するために要る．
+    開催中なら [QR表示] [状況] を，無ければ [開始] を出す．これが無いと
+    どちらのボタンを出すべきか画面側で決められない．
+
+    認可は `require_course_owner` のみに委ね，ここに if を書かない．
+    他の教員の授業IDを指定された場合は依存関数が404を返す（403にすると
+    「そのIDの授業は存在する」と分かってしまうため．api-design.md）．
+
+    `token_salt` は返さない．レスポンスの形は `AttendanceSessionResponse` に
+    固定されており，モデルに列を足しても勝手に露出しない．
+    """
+    sessions = (
+        db.query(models.AttendanceSession)
+        .filter(models.AttendanceSession.course_id == course.id)
+        .order_by(
+            # 開始予定時刻はミリ秒まで固定長のISO 8601で持っているので，
+            # 文字列の降順がそのまま時刻の降順になる（decisions.md D-11）．
+            models.AttendanceSession.scheduled_start_at.desc(),
+            models.AttendanceSession.id.desc(),
+        )
+        .all()
+    )
+    return [_to_session_response(sess) for sess in sessions]
+
+
+@app.get(
     "/attendance-sessions/{attendance_session_id}/token",
     response_model=TokenResponse,
 )
@@ -1250,12 +1285,25 @@ def teacher_courses_view(
     request: Request,
     user: models.User = Depends(require_teacher),
 ):
-    """ログイン直後に教員が最初に見る画面."""
+    """ログイン直後に教員が最初に見る画面.
+
+    受付時間帯の分数をテンプレートに渡している．セッション開始ダイアログで
+    「出席：09:55〜10:05／遅刻：10:05〜10:20」と表示し，入力した授業開始時刻が
+    正しいかを教員自身に確認させるため（screen-design.md S5）．
+
+    **JS側に数字を直書きさせないためにサーバーから渡す．** 直書きすると
+    `.env` で値を変えたときに画面の表示だけが古いまま残り，教員が見ている
+    受付時間帯と実際の判定がずれる．誤入力を防ぐための表示が逆に誤解を生む．
+    """
+    settings = get_settings()
     return templates.TemplateResponse(
         request=request,
         name="teacher_courses.html",
         context={
             "display_name": user.display_name,
             "csrf_token": csrf_token_for_request(request),
+            "present_before_minutes": settings.present_before_minutes,
+            "present_after_minutes": settings.present_after_minutes,
+            "late_until_minutes": settings.late_until_minutes,
         },
     )
