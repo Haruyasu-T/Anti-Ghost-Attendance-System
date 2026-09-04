@@ -22,12 +22,13 @@ api-design.md の「認証」セクションに対応する3エンドポイン�
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -54,7 +55,41 @@ from scripts.init_db import create_tables
 # 記載する候補）．
 SCHEDULED_START_TOLERANCE = timedelta(hours=3)
 
-app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム")
+# --------------------------------------------------------- 起動時のテーブル作成
+#
+# 以前はここ（モジュールレベル）で `create_tables()` を直接呼んでいた．
+# それだと `import app.main` した時点でDBファイルへの書き込みが走ってしまい，
+# `pytest` を流しただけでもリポジトリ直下に `attendance.db` ができていた
+# （`.gitignore` で除外されるので事故にはならないが，「アプリを読み込む＝
+# ディスクに書き込む」状態になっていた）．本番でファイルシステムが読み取り
+# 専用だと，import した時点で起動が落ちてしまう（次の編集内容 #2）．
+#
+# そこで FastAPI の lifespan に移し，アプリ起動時にだけ呼ぶようにする．
+#
+# テーブル作成のロジックは `scripts/init_db.py` の `create_tables()` に
+# 一本化されている．`python -m scripts.init_db` で単体実行できるほか，
+# アプリ起動のタイミングでもここから同じ関数を呼び，テーブルが無ければ作る
+# （テーブルが無いまま `/auth/login` を叩くと500になるため，起動時の
+# 呼び出しは残す）．
+#
+# `create_tables` の中身（`Base.metadata.create_all`）は既存テーブルには
+# 触れない（checkfirst=Trueが既定）ので，二度目以降の起動やDBが既にある
+# 場合に呼んでも安全．初期データ（教員・学生・授業）を入れるのは別の
+# スクリプト（B-2）の役目とし，ここではスキーマの用意だけを行う．
+#
+# 副次効果として，`create_tables()` は内部で `get_engine()`→`get_settings()`
+# を呼ぶため，`TOKEN_SECRET` や `CAMPUS_IP_RANGES` の設定不備もこの時点で
+# 検出される（config.pyが本来意図している「起動時に検証する」動きに合わせ
+# られる）．
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_tables()
+    yield
+
+
+app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム", lifespan=lifespan)
 
 # 状態を変えるリクエストにCSRFトークンを要求する（decisions.md D-14）．
 # エンドポイントごとに require_csrf 相当を付ける方式にしていないのは，
@@ -67,25 +102,6 @@ templates = Jinja2Templates(directory="app/templates")
 
 # 画面ルートでも使うので、依存関数をここで1つ作って共有する．
 require_teacher = require_role("teacher")
-
-# --------------------------------------------------------- 起動時のテーブル作成
-#
-# テーブル作成のロジックは `scripts/init_db.py` の `create_tables()` に
-# 一本化されている．`python -m scripts.init_db` で単体実行できるほか，
-# モジュール読み込み＝アプリ起動のタイミングでもここから同じ関数を呼び，
-# テーブルが無ければ作る（テーブルが無いまま `/auth/login` を叩くと
-# 500になるため，このapp起動時の呼び出しも残す）．
-#
-# `create_tables` の中身（`Base.metadata.create_all`）は既存テーブルには
-# 触れない（checkfirst=Trueが既定）ので，二度目以降の起動やDBが既にある
-# 場合に呼んでも安全．初期データ（教員・学生・授業）を入れるのは別の
-# スクリプト（B-2）の役目とし，ここではスキーマの用意だけを行う．
-#
-# 副次効果として，`create_tables()` は内部で `get_engine()`→`get_settings()`
-# を呼ぶため，`TOKEN_SECRET` や `CAMPUS_IP_RANGES` の設定不備もこの時点で
-# 検出される（config.pyが本来意図している「起動時に検証する」動きに合わせ
-# られる）．
-create_tables()
 
 
 @app.get("/health")
@@ -135,12 +151,68 @@ def student_home_view(
     )
 
 
+# 未ログインで /scan を開いたときに返す案内画面（次の編集内容 #1）．
+#
+# `Depends(require_role("student"))` に任せると，未ログイン時は
+# `require_login` が投げる401のJSON（`{"detail": "ログインが必要です"}`）が
+# そのまま学生の画面に出てしまう．授業中にこれが出ても何が起きたか伝わらない．
+#
+# `/login` へリダイレクトしない理由：QRの `s`/`t` はクエリ文字列にしか無く，
+# リダイレクトすると失われて，結局読み直しになる．それなら最初から
+# 「ログインしてから、もう一度読み取ってください」と伝える方が親切
+# （screen-design.md の「授業開始前にログインしておいてください」と同じ考え方）．
+#
+# `templates/`（画面テンプレート）は担当Cの領域なので新しいテンプレート
+# ファイルは増やさず，このファイル内で完結する軽量なHTMLをそのまま返す．
+_SCAN_LOGIN_REQUIRED_HTML = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<title>ログインが必要です | 出席管理システム</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="auth-page">
+<main class="container">
+<section class="card auth-card result-card" aria-labelledby="scan-login-title">
+<div class="result-symbol" aria-hidden="true">！</div>
+<h1 id="scan-login-title">ログインが必要です</h1>
+<p class="muted">ログインしてから、もう一度QRを読み取ってください。</p>
+<div class="button-row">
+<a class="btn btn-primary" href="/login">ログイン画面へ</a>
+</div>
+</section>
+</main>
+</body>
+</html>
+"""
+
+
 @app.get("/scan")
 def scan_page(
     request: Request,
-    user: models.User = Depends(require_role("student")),
+    db: Session = Depends(get_db),
 ):
-    """QRから遷移してくる読み取り画面（カメラアプリからの直接着地も含む）."""
+    """QRから遷移してくる読み取り画面（カメラアプリからの直接着地も含む）.
+
+    `index` と同じ理由で `Depends(require_role("student"))` を使わない．
+    未ログイン時に日本語の案内画面（401）を返したいため，
+    `security.get_session_user` を直接呼んで判定する．
+    """
+    user = security.get_session_user(db, request.cookies.get(SESSION_COOKIE))
+    if user is None:
+        return HTMLResponse(
+            content=_SCAN_LOGIN_REQUIRED_HTML,
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
+
+    if user.role != "student":
+        # 教員アカウント等でのアクセスは「未ログイン」とは別物の異常系なので，
+        # 従来通りJSONの403のままにする（案内画面が要るのは未ログインの場合だけ）．
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="権限がありません")
+
     return templates.TemplateResponse(
         request=request,
         name="scan.html",
