@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}ログインが必要です | 出席管理システム{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="card auth-card result-card" aria-labelledby="scan-login-title">
+    <div class="result-symbol" aria-hidden="true">！</div>
+    <h1 id="scan-login-title">ログインが必要です</h1>
+    <p class="muted">ログインしてから、もう一度QRを読み取ってください。</p>
+    <div class="button-row">
+        <a class="btn btn-primary" href="/login">ログイン画面へ</a>
+    </div>
+</section>
+{% endblock %}

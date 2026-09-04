@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -151,44 +151,6 @@ def student_home_view(
     )
 
 
-# 未ログインで /scan を開いたときに返す案内画面（次の編集内容 #1）．
-#
-# `Depends(require_role("student"))` に任せると，未ログイン時は
-# `require_login` が投げる401のJSON（`{"detail": "ログインが必要です"}`）が
-# そのまま学生の画面に出てしまう．授業中にこれが出ても何が起きたか伝わらない．
-#
-# `/login` へリダイレクトしない理由：QRの `s`/`t` はクエリ文字列にしか無く，
-# リダイレクトすると失われて，結局読み直しになる．それなら最初から
-# 「ログインしてから、もう一度読み取ってください」と伝える方が親切
-# （screen-design.md の「授業開始前にログインしておいてください」と同じ考え方）．
-#
-# `templates/`（画面テンプレート）は担当Cの領域なので新しいテンプレート
-# ファイルは増やさず，このファイル内で完結する軽量なHTMLをそのまま返す．
-_SCAN_LOGIN_REQUIRED_HTML = """<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="color-scheme" content="light">
-<title>ログインが必要です | 出席管理システム</title>
-<link rel="stylesheet" href="/static/css/style.css">
-</head>
-<body class="auth-page">
-<main class="container">
-<section class="card auth-card result-card" aria-labelledby="scan-login-title">
-<div class="result-symbol" aria-hidden="true">！</div>
-<h1 id="scan-login-title">ログインが必要です</h1>
-<p class="muted">ログインしてから、もう一度QRを読み取ってください。</p>
-<div class="button-row">
-<a class="btn btn-primary" href="/login">ログイン画面へ</a>
-</div>
-</section>
-</main>
-</body>
-</html>
-"""
-
-
 @app.get("/scan")
 def scan_page(
     request: Request,
@@ -199,11 +161,19 @@ def scan_page(
     `index` と同じ理由で `Depends(require_role("student"))` を使わない．
     未ログイン時に日本語の案内画面（401）を返したいため，
     `security.get_session_user` を直接呼んで判定する．
+
+    `require_login` が投げる401のJSON（`{"detail": "ログインが必要です"}`）を
+    そのまま返すと，授業中に学生の画面へ生のJSONが出て何が起きたか伝わらない．
+    `/login` へリダイレクトしないのは，QRの `s`/`t` がクエリ文字列にしか無く，
+    リダイレクトすると失われて結局読み直しになるため．それなら最初から
+    「もう一度読み取ってください」と伝える方が親切
+    （screen-design.md の「授業開始前にログインしておいてください」と同じ考え方）．
     """
     user = security.get_session_user(db, request.cookies.get(SESSION_COOKIE))
     if user is None:
-        return HTMLResponse(
-            content=_SCAN_LOGIN_REQUIRED_HTML,
+        return templates.TemplateResponse(
+            request=request,
+            name="scan_login_required.html",
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
