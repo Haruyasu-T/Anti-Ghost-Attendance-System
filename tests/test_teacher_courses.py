@@ -92,6 +92,43 @@ def test_courses_includes_only_each_courses_open_session():
     }]
 
 
+def test_closed_sessions_do_not_look_open():
+    """終了したセッションしかない授業では open_session を返さないこと.
+
+    変異テストで見つかった穴を塞ぐもの。上のテストは開催中（id=2）が
+    終了済み（id=1）より新しいので、`status == "open"` の絞り込みを外しても
+    id の降順で開催中が先に来て、結果が変わらず素通りしてしまう。
+
+    実際に困るのはこの形。授業を終了した直後は開催中が1つも無く、絞り込みが
+    効いていないと終了済みのセッションを「開催中」として返す。画面のカードに
+    「開催中のセッションあり」と出て、終了済みのQR画面へのリンクが並ぶ。
+    """
+    db = _test_session()
+    course = Course(name="情報セキュリティ", teacher_id=10)
+    db.add(course)
+    db.flush()
+    course_id = course.id
+    db.add(AttendanceSession(
+        course_id=course.id, status="closed", closed_at="2026-09-05T02:00:00.000Z",
+        scheduled_start_at="2026-09-05T01:00:00.000Z",
+        started_at="2026-09-05T01:00:00.000Z",
+        required_scan_count=1, token_salt="test-salt", created_by=10,
+    ))
+    db.commit()
+
+    app.dependency_overrides[require_teacher] = lambda: SimpleNamespace(
+        id=10, role="teacher", display_name="担当教員"
+    )
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        response = TestClient(app).get("/courses")
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+    assert response.json() == [{"id": course_id, "name": "情報セキュリティ"}]
+
+
 def test_teacher_courses_view_is_available_after_login():
     app.dependency_overrides[require_teacher] = lambda: SimpleNamespace(
         id=10, role="teacher", display_name="担当教員"
