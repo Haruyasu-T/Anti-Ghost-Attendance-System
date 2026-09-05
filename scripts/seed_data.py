@@ -41,10 +41,24 @@ STUDENTS = [
 ]
 UNENROLLED = {"S0005"}
 
+# 管理者1名．授業と履修の割り当てだけを行い，出席記録には触れない．
+# 本番で使うアカウントをこのスクリプトで作らないこと．ここで作るのは
+# 動作確認用で，パスワードは他のアカウントと共通になっている．
+ADMINS = [("A0001", "管理 事務")]
+
 
 def seed(db: Session, password: str) -> None:
-    """教員2名・学生5名・授業2つ・履修関係を作る."""
+    """管理者1名・教員2名・学生5名・授業2つ・履修関係を作る."""
     password_hash = security.hash_password(password)
+
+    for login_id, display_name in ADMINS:
+        db.add(models.User(
+            login_id=login_id,
+            role="admin",
+            display_name=display_name,
+            password_hash=password_hash,
+        ))
+    db.flush()
 
     teachers = {}
     for login_id, display_name, course_name in TEACHERS:
@@ -96,6 +110,7 @@ def main() -> int:
         seed(db, password)
 
     print("初期データを投入しました。")
+    print(f"  管理者 {', '.join(a[0] for a in ADMINS)}")
     print(f"  教員   {', '.join(t[0] for t in TEACHERS)}")
     print(f"  学生   {', '.join(s[0] for s in STUDENTS)}"
           f"（{', '.join(sorted(UNENROLLED))} は未履修）")
