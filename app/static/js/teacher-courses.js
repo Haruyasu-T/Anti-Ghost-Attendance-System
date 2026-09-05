@@ -34,9 +34,9 @@ function buttonLink(label, href, className = "btn-secondary") {
     return link;
 }
 
-function renderCourses(coursesWithSessions) {
+function renderCourses(courses) {
     courseList.replaceChildren();
-    for (const {course, sessions} of coursesWithSessions) {
+    for (const course of courses) {
         const card = document.createElement("article");
         card.className = "course-card";
 
@@ -46,7 +46,7 @@ function renderCourses(coursesWithSessions) {
 
         const body = document.createElement("div");
         body.className = "course-card-body";
-        const openSession = sessions.find((session) => session.status === "open");
+        const openSession = course.open_session;
 
         const status = document.createElement("p");
         status.className = openSession ? "session-state session-state-open" : "session-state";
@@ -116,15 +116,6 @@ function openStartDialog(course) {
     startInput.focus();
 }
 
-async function loadCourseSessions(course) {
-    const response = await fetch(`/courses/${course.id}/attendance-sessions`, {
-        credentials: "same-origin",
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const sessions = await response.json();
-    return {course, sessions: Array.isArray(sessions) ? sessions : []};
-}
-
 async function loadCourses() {
     try {
         const response = await fetch("/courses", {credentials: "same-origin"});
@@ -139,8 +130,7 @@ async function loadCourses() {
             showMessage("担当授業は登録されていません。");
             return;
         }
-        const coursesWithSessions = await Promise.all(courses.map(loadCourseSessions));
-        renderCourses(coursesWithSessions);
+        renderCourses(courses);
     } catch (error) {
         errorBox.textContent = "授業一覧を取得できませんでした。時間をおいて再度お試しください。";
         errorBox.hidden = false;
