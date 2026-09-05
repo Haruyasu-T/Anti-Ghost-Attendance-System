@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app import security
 from app.db import get_db
 from app.main import app, require_teacher
-from app.models import Base, Course, User
+from app.models import AttendanceSession, Base, Course, User
 
 
 def _test_session():
@@ -45,6 +45,51 @@ def test_courses_returns_only_signed_in_teachers_courses():
         {"id": 2, "name": "ネットワーク基礎"},
         {"id": 1, "name": "情報セキュリティ"},
     ]
+
+
+def test_courses_includes_only_each_courses_open_session():
+    db = _test_session()
+    own_course = Course(name="情報セキュリティ", teacher_id=10)
+    other_course = Course(name="他教員の授業", teacher_id=20)
+    db.add_all([own_course, other_course])
+    db.flush()
+    own_course_id = own_course.id
+    session_values = {
+        "scheduled_start_at": "2026-09-05T01:00:00.000Z",
+        "started_at": "2026-09-05T01:00:00.000Z",
+        "required_scan_count": 1,
+        "token_salt": "test-salt",
+    }
+    db.add_all([
+        AttendanceSession(
+            course_id=own_course.id, status="closed", closed_at="2026-09-05T02:00:00.000Z",
+            created_by=10, **session_values,
+        ),
+        AttendanceSession(
+            course_id=own_course.id, status="open", created_by=10, **session_values,
+        ),
+        AttendanceSession(
+            course_id=other_course.id, status="open", created_by=20, **session_values,
+        ),
+    ])
+    db.commit()
+
+    app.dependency_overrides[require_teacher] = lambda: SimpleNamespace(
+        id=10, role="teacher", display_name="担当教員"
+    )
+    app.dependency_overrides[get_db] = lambda: db
+    try:
+        response = TestClient(app).get("/courses")
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+    assert response.status_code == 200
+    assert response.json() == [{
+        "id": own_course_id,
+        "name": "情報セキュリティ",
+        "open_session": {"id": 2, "status": "open"},
+    }]
 
 
 def test_teacher_courses_view_is_available_after_login():
