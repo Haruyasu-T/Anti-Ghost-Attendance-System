@@ -36,22 +36,56 @@ QRコードを学内Wi-Fi環境下で読み込んだときだけ出席として�
 
 ## セットアップ
 
+### 1. 依存関係
+
 ```bash
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-
-cp .env.example .env       # TOKEN_SECRET などを設定する
-uvicorn app.main:app --reload
 ```
 
-`TOKEN_SECRET` は次のコマンドで生成できます．
+Windowsで `activate` が「スクリプトの実行が無効」と言われる場合は，以降のコマンドを `venv\Scripts\python.exe -m ...` の形で実行すれば同じことができます．有効化に失敗したまま `pip install` すると，グローバル側に入ってしまうので注意．
+
+### 2. 設定
+
+```bash
+cp .env.example .env
+```
+
+必須は2つです．`TOKEN_SECRET` は次のコマンドで生成できます．
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-未設定だと起動時にエラーで止まります（開発用の既定値をコードに埋めていないため）．
+`CAMPUS_IP_RANGES` はローカルで動かすだけなら `127.0.0.1/32,192.168.0.0/16` で足ります．**本物の学内IPはデプロイ後に学内Wi-Fiから調べる値**なので，ここには書きません（[test-report.md](docs/test-report.md)）．
+
+どちらも未設定だと起動時にエラーで止まります．開発用の既定値をコードに埋めていないためです（[decisions.md](docs/decisions.md) D-1）．
+
+### 3. データベース
+
+```bash
+python -m scripts.init_db      # 10テーブルを作る
+python -m scripts.seed_data    # 教員2名・学生5名・授業2つを入れる
+```
+
+**この2つを飛ばすとログインで500になります．** テーブルはアプリ起動時にも作られますが，中身が空だとアカウントが1つも無いためです．
+
+`seed_data` はパスワードを**実行時に1度だけ表示します**．控えておいてください．固定値をリポジトリに置かないためで，環境変数 `SEED_PASSWORD` を指定すればその値を使います．
+
+作られるアカウントは `T0001`・`T0002`（教員）と `S0001`〜`S0005`（学生）です．すべて架空の値です．`S0005` はどの授業にも履修登録していません（未履修者の拒否を試すため）．
+
+### 4. 起動
+
+```bash
+uvicorn app.main:app --reload
+```
+
+**ブラウザでは `http://localhost:8000` を開いてください．**
+
+`http://192.168.x.x` のようなLAN内のアドレスだとログインできません．セッションCookieに `Secure` を付けているため，HTTPSでないとブラウザが保存しないからです（`localhost` だけは例外扱いされます）．同じ理由でQR読み取りのカメラも起動しません．
+
+**スマホから試すにはデプロイが必要です**（[deployment-guide.md](docs/deployment-guide.md)）．
 
 ## テスト
 
