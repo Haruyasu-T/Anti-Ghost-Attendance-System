@@ -217,9 +217,15 @@ class MeResponse(BaseModel):
     display_name: str
 
 
+class OpenSessionResponse(BaseModel):
+    id: int
+    status: str
+
+
 class CourseResponse(BaseModel):
     id: int
     name: str
+    open_session: OpenSessionResponse | None = None
 
 
 class StartSessionRequest(BaseModel):
@@ -1440,17 +1446,49 @@ def list_my_attendances(
 # 一覧は「ログイン中の教員が担当する授業」だけを返す．授業IDを受け取って
 # 絞り込む形にすると，他人のIDを入れられたときの防御が呼び出し側頼みになる．
 
-@app.get("/courses", response_model=list[CourseResponse])
+@app.get(
+    "/courses",
+    response_model=list[CourseResponse],
+    response_model_exclude_none=True,
+)
 def list_courses(
     user: models.User = Depends(require_teacher),
     db: Session = Depends(get_db),
 ):
-    return (
+    courses = (
         db.query(models.Course)
         .filter(models.Course.teacher_id == user.id)
         .order_by(models.Course.name, models.Course.id)
         .all()
     )
+    if not courses:
+        return []
+
+    # 担当授業の開催中セッションを一括取得し，画面から授業ごとにHTTP
+    # リクエストを送らなくて済むようにする．
+    open_sessions = (
+        db.query(models.AttendanceSession)
+        .filter(
+            models.AttendanceSession.course_id.in_([course.id for course in courses]),
+            models.AttendanceSession.status == "open",
+        )
+        .order_by(models.AttendanceSession.id.desc())
+        .all()
+    )
+    # 開始APIが二重作成を409で拒否するため通常は1授業1件．既存データに
+    # 複数件あっても最新の1件だけを採用し，授業カードを重複させない．
+    open_session_by_course = {}
+    for session_row in open_sessions:
+        open_session_by_course.setdefault(session_row.course_id, session_row)
+
+    return [
+        {
+            "id": course.id,
+            "name": course.name,
+            "open_session": open_session_by_course.get(course.id),
+        }
+        for course in courses
+    ]
 
 
 @app.get("/teacher/courses")
