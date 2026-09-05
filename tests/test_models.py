@@ -201,14 +201,30 @@ def test_multiple_scans_with_different_seq_are_allowed(session, fixture_data):
 # ------------------------------------------------------- CHECK 制約
 
 def test_invalid_role_is_rejected(session):
-    """role は student / teacher のみ．アプリ側の検証を抜けても入らないこと."""
+    """role は student / teacher / admin のみ．アプリ側の検証を抜けても入らないこと.
+
+    以前はこのテストで `admin` を「不正な値」の例に使っていたが，管理者を
+    足したので正当な値になった（decisions.md D-17）．ロールを増やしたときは
+    このテストの例も更新すること．
+    """
     session.add(models.User(
-        login_id="X0001", role="admin",
+        login_id="X0001", role="superuser",
         display_name="不正なロール", password_hash="dummy-hash",
     ))
 
     with pytest.raises(IntegrityError):
         session.flush()
+
+
+def test_admin_role_is_allowed(session):
+    """admin は正当なロールとして入ること."""
+    session.add(models.User(
+        login_id="A9999", role="admin",
+        display_name="管理者", password_hash="dummy-hash",
+    ))
+    session.flush()
+
+    assert session.query(models.User).filter_by(login_id="A9999").count() == 1
 
 
 def test_invalid_attendance_status_is_rejected(session, fixture_data):
