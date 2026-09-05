@@ -111,7 +111,10 @@ class User(Base):
                         server_default=_UTC_NOW_ISO8601)
 
     __table_args__ = (
-        CheckConstraint("role IN ('student', 'teacher')",
+        # admin は授業と履修の管理だけを行う役割．出席記録には触れない
+        # （decisions.md D-17）．ロールを増やすので，既存のDBファイルは
+        # 作り直しが要る（SQLiteはCHECK制約を後から変更できない）．
+        CheckConstraint("role IN ('student', 'teacher', 'admin')",
                         name="ck_users_role"),
         _iso8601_utc_check("created_at", "ck_users_created_at_iso8601"),
     )

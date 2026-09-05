@@ -124,15 +124,20 @@ def login_page(request: Request):
 
 @app.get("/")
 def index(request: Request, db: Session = Depends(get_db)):
-    """ルート．ロールで教員／学生の入口へ振り分け，未ログインなら /login へ．
+    """ルート．ロールごとの入口へ振り分け，未ログインなら /login へ．
 
     `Depends(require_login)` を使わないのはここだけ意図的．require_login は
     未ログイン時に401（JSON）を返すが，ここはブラウザの画面遷移なので
     リダイレクトで応答したい．そのため `security.get_session_user` を直接呼ぶ．
+
+    振り分けは利便性のためであって，認可ではない．各画面が自分で
+    `require_role` を持っているので，直接URLを叩かれても通らない．
     """
     user = security.get_session_user(db, request.cookies.get(SESSION_COOKIE))
     if user is None:
         return RedirectResponse(url="/login")
+    if user.role == "admin":
+        return RedirectResponse(url="/admin")
     if user.role == "teacher":
         return RedirectResponse(url="/teacher/courses")
     return RedirectResponse(url="/student")
@@ -1359,8 +1364,11 @@ def register_attendance(
 # 決まる本人だけにする．`/students/{student_id}/attendances` のような形を
 # 作らなければ，他人の記録を覗く攻撃はそもそも成立しない．
 #
-# api-design.mdの認可欄は「要ログイン」であって「student」限定ではないため，
-# ここでは `require_role("student")` ではなく `require_login` を使う．
+# 当初は api-design.md の認可欄が「要ログイン」だったので `require_login` に
+# していた．管理者ロールを足した時点で `student` 限定に変えている（D-17）．
+# 返るのは呼び出した本人の記録だけなので，管理者が叩いても中身は空だが，
+# 「管理者は出席記録に触れない」という境界を，結果ではなく認可で示しておく．
+# 教員も自分の出席記録を持たないので，ここに来る理由がない．
 
 class MyAttendanceRow(BaseModel):
     course_name: str
@@ -1374,7 +1382,7 @@ class MyAttendanceRow(BaseModel):
 
 @app.get("/me/attendances", response_model=list[MyAttendanceRow])
 def list_my_attendances(
-    user: models.User = Depends(require_login),
+    user: models.User = Depends(require_role("student")),
     db: Session = Depends(get_db),
 ):
     # 履修している授業の出席セッションだけを対象にする．
@@ -1472,3 +1480,309 @@ def teacher_courses_view(
             "late_until_minutes": settings.late_until_minutes,
         },
     )
+
+
+# ============================================================ 管理者（D-17）
+#
+# 授業の追加・編集と，担当教員・履修者の割り当てを行う画面とAPI．
+#
+# **管理者は出席記録に触れない．** 出席の閲覧・修正は担当教員だけができる．
+# 名簿を作る権限と，記録を書き換える権限を同じアカウントに持たせない．両方を
+# 持つアカウントが1つ乗っ取られると，「自分を担当教員にして」「自分で出席を
+# 入れる」が1人で完結してしまう．
+#
+# その分離を実際に効かせているのが次の2つの検証．UIで選択肢を絞るだけでは
+# 足りない．画面にボタンが無いことは制約ではない（screen-design.md）．
+#
+#   1. 担当教員に指定できるのは role が teacher の利用者だけ．
+#      管理者が自分自身を担当教員にできると，そこから /token を取りに行ける
+#      経路ができる．ロールで弾いておけば，管理者アカウントのままでは
+#      教員用エンドポイントに到達できない
+#   2. 履修者に登録できるのは role が student の利用者だけ．
+#      教員や管理者を混ぜると出席一覧に現れて名簿が壊れる
+#
+# 授業の削除は用意していない．出席記録と監査ログが授業を参照しており，消すと
+# 追跡ができなくなる．不要になった授業は残す．
+
+require_admin = require_role("admin")
+
+
+class AdminUserRow(BaseModel):
+    id: int
+    login_id: str
+    display_name: str
+    role: str
+
+
+class AdminCourseRow(BaseModel):
+    id: int
+    name: str
+    teacher_id: int
+    teacher_login_id: str
+    teacher_display_name: str
+    enrolled_count: int
+    # 出席セッションが1回でも行われた授業は，担当教員を変えると過去の記録の
+    # 閲覧権限も移る．画面で注意を出せるように件数を返す．
+    session_count: int
+
+
+class CourseWriteRequest(BaseModel):
+    name: str
+    teacher_id: int
+
+
+class EnrollmentWriteRequest(BaseModel):
+    user_ids: list[int]
+
+
+def _require_teacher_user(db: Session, teacher_id: int) -> models.User:
+    """担当教員に指定できるのは role が teacher の利用者だけ."""
+    teacher = db.get(models.User, teacher_id)
+    if teacher is None or teacher.role != "teacher":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="担当教員には教員アカウントを指定してください",
+        )
+    return teacher
+
+
+def _clean_course_name(raw: str) -> str:
+    name = raw.strip()
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="授業名を入力してください")
+    if len(name) > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="授業名が長すぎます")
+    return name
+
+
+def _to_admin_user_row(user: models.User) -> AdminUserRow:
+    return AdminUserRow(
+        id=user.id,
+        login_id=user.login_id,
+        display_name=user.display_name,
+        role=user.role,
+    )
+
+
+def _to_admin_course_row(db: Session, course: models.Course) -> AdminCourseRow:
+    teacher = db.get(models.User, course.teacher_id)
+    return AdminCourseRow(
+        id=course.id,
+        name=course.name,
+        teacher_id=course.teacher_id,
+        teacher_login_id=teacher.login_id if teacher is not None else "",
+        teacher_display_name=teacher.display_name if teacher is not None else "",
+        enrolled_count=(
+            db.query(models.Enrollment)
+            .filter(models.Enrollment.course_id == course.id)
+            .count()
+        ),
+        session_count=(
+            db.query(models.AttendanceSession)
+            .filter(models.AttendanceSession.course_id == course.id)
+            .count()
+        ),
+    )
+
+
+def _enrolled_users(db: Session, course_id: int) -> list[AdminUserRow]:
+    users = (
+        db.query(models.User)
+        .join(models.Enrollment, models.Enrollment.user_id == models.User.id)
+        .filter(models.Enrollment.course_id == course_id)
+        .order_by(models.User.login_id)
+        .all()
+    )
+    return [_to_admin_user_row(u) for u in users]
+
+
+@app.get("/admin")
+def admin_console_view(
+    request: Request,
+    user: models.User = Depends(require_admin),
+):
+    """管理者の画面."""
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={
+            "display_name": user.display_name,
+            "csrf_token": csrf_token_for_request(request),
+        },
+    )
+
+
+@app.get("/admin/users", response_model=list[AdminUserRow])
+def admin_list_users(
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """割り当ての候補にする利用者の一覧.
+
+    `password_hash` は返さない．レスポンスの形を固定しているので，モデルに
+    列を足しても勝手に露出しない．他の管理者アカウントも一覧に出さない
+    （割り当ての候補にならないため）．
+    """
+    users = (
+        db.query(models.User)
+        .filter(models.User.role.in_(["teacher", "student"]))
+        .order_by(models.User.role, models.User.login_id)
+        .all()
+    )
+    return [_to_admin_user_row(u) for u in users]
+
+
+@app.get("/admin/courses", response_model=list[AdminCourseRow])
+def admin_list_courses(
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    courses = (
+        db.query(models.Course).order_by(models.Course.name, models.Course.id).all()
+    )
+    return [_to_admin_course_row(db, c) for c in courses]
+
+
+@app.post("/admin/courses", response_model=AdminCourseRow)
+def admin_create_course(
+    payload: CourseWriteRequest,
+    request: Request,
+    user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    name = _clean_course_name(payload.name)
+    teacher = _require_teacher_user(db, payload.teacher_id)
+
+    course = models.Course(name=name, teacher_id=teacher.id)
+    db.add(course)
+    db.flush()
+
+    security.write_audit_log(
+        db,
+        action="course_create",
+        result="success",
+        actor_user_id=user.id,
+        client_ip=security.get_client_ip(request),
+        target_type="course",
+        target_id=course.id,
+        detail=f"teacher_id={teacher.id}",
+    )
+    return _to_admin_course_row(db, course)
+
+
+@app.put("/admin/courses/{course_id}", response_model=AdminCourseRow)
+def admin_update_course(
+    course_id: int,
+    payload: CourseWriteRequest,
+    request: Request,
+    user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """授業名と担当教員を変更する.
+
+    **担当教員を変えると，その授業の過去の出席記録の閲覧権限も移る**
+    （`require_session_owner` が `course.teacher_id` を見ているため）．
+    引き継ぎでは必要な挙動だが，記録が別の人に見えるようになる操作なので，
+    変更前後の担当教員を監査ログに残す．
+    """
+    course = db.get(models.Course, course_id)
+    if course is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="見つかりません")
+
+    name = _clean_course_name(payload.name)
+    teacher = _require_teacher_user(db, payload.teacher_id)
+
+    before_teacher_id = course.teacher_id
+    course.name = name
+    course.teacher_id = teacher.id
+
+    security.write_audit_log(
+        db,
+        action="course_update",
+        result="success",
+        actor_user_id=user.id,
+        client_ip=security.get_client_ip(request),
+        target_type="course",
+        target_id=course.id,
+        detail=f"teacher_id={before_teacher_id}->{teacher.id}",
+    )
+    return _to_admin_course_row(db, course)
+
+
+@app.get("/admin/courses/{course_id}/enrollments", response_model=list[AdminUserRow])
+def admin_list_enrollments(
+    course_id: int,
+    _: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if db.get(models.Course, course_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="見つかりません")
+    return _enrolled_users(db, course_id)
+
+
+@app.put("/admin/courses/{course_id}/enrollments", response_model=list[AdminUserRow])
+def admin_replace_enrollments(
+    course_id: int,
+    payload: EnrollmentWriteRequest,
+    request: Request,
+    user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """履修者を，指定された集合で置き換える.
+
+    差分ではなく集合で受け取る．画面が「チェックした人が履修者」という形な
+    ので，追加と削除を別々に送らせると，途中で失敗したときに画面とDBがずれる．
+
+    **履修から外しても，その学生の過去の出席記録は消さない．** 記録を消す
+    権限を管理者に持たせない．履修者一覧に出なくなるだけで，出席記録も
+    監査ログもそのまま残る．
+    """
+    if db.get(models.Course, course_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="見つかりません")
+
+    requested = set(payload.user_ids)
+    if requested:
+        found = (
+            db.query(models.User.id)
+            .filter(models.User.id.in_(requested), models.User.role == "student")
+            .count()
+        )
+        # 存在しないID・学生でないIDが混ざっていたら，一部だけ通さずまとめて拒否する．
+        if found != len(requested):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="履修者には学生アカウントを指定してください",
+            )
+
+    before = {
+        row.user_id
+        for row in db.query(models.Enrollment)
+        .filter(models.Enrollment.course_id == course_id)
+        .all()
+    }
+
+    for user_id in before - requested:
+        db.query(models.Enrollment).filter(
+            models.Enrollment.course_id == course_id,
+            models.Enrollment.user_id == user_id,
+        ).delete()
+    for user_id in requested - before:
+        db.add(models.Enrollment(course_id=course_id, user_id=user_id))
+
+    security.write_audit_log(
+        db,
+        action="enrollment_update",
+        result="success",
+        actor_user_id=user.id,
+        client_ip=security.get_client_ip(request),
+        target_type="course",
+        target_id=course_id,
+        detail=f"added={len(requested - before)} removed={len(before - requested)}",
+    )
+    db.flush()
+    return _enrolled_users(db, course_id)
