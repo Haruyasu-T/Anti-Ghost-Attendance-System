@@ -20,6 +20,28 @@
     <div id="courses-list" class="action-grid" aria-live="polite" aria-busy="true">
         <p class="muted">授業を読み込んでいます…</p>
     </div>
+
+    <dialog id="start-session-dialog" aria-labelledby="start-session-title">
+        <form id="start-session-form" class="dialog-body">
+            <p class="eyebrow">出席受付</p>
+            <h2 id="start-session-title">出席セッションを開始</h2>
+            <p id="start-session-course" class="muted"></p>
+
+            <div class="stack">
+                <label for="scheduled-start-at">授業開始時刻</label>
+                <input id="scheduled-start-at" name="scheduled_start_at" type="datetime-local"
+                       step="300" required>
+                <p class="muted input-help">この時刻が出席・遅刻の判定基準になります。</p>
+                <div id="attendance-window" class="notice" aria-live="polite"></div>
+                <div id="start-session-error" class="alert alert-error" role="alert" hidden></div>
+            </div>
+
+            <div class="dialog-actions">
+                <button id="cancel-session-button" class="btn btn-quiet" type="button">キャンセル</button>
+                <button id="confirm-session-button" class="btn btn-primary" type="submit">開始</button>
+            </div>
+        </form>
+    </dialog>
 </section>
 {% endblock %}
 {% block scripts %}
