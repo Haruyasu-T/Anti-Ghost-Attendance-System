@@ -1,8 +1,5 @@
 {% extends "base.html" %}
 {% block title %}授業管理 | 出席管理システム{% endblock %}
-{% block header_actions %}
-<button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
-{% endblock %}
 {% block content %}
 <section data-admin-console data-csrf-token="{{ csrf_token }}">
     <div class="page-heading">
@@ -13,16 +10,18 @@
 
     <div id="admin-error" class="alert alert-error" role="alert" hidden></div>
 
-    <div class="button-row">
-        <button id="new-course-button" class="btn btn-primary" type="button">授業を追加</button>
+    <div class="button-row admin-toolbar">
+        <button id="new-course-button" class="btn btn-primary" type="button" disabled>授業を追加</button>
+        <button id="admin-retry" class="btn btn-secondary" type="button" hidden>再読み込み</button>
     </div>
+    <p id="no-teachers" class="notice" hidden>教員アカウントがまだありません。授業を追加するには教員アカウントが必要です。</p>
 
     <div class="table-wrap">
         <table>
             <thead>
                 <tr><th>授業名</th><th>担当教員</th><th>履修者</th><th>実施回数</th><th>操作</th></tr>
             </thead>
-            <tbody id="admin-courses" aria-live="polite">
+            <tbody id="admin-courses" aria-live="polite" aria-busy="true">
                 <tr><td colspan="5">読み込んでいます…</td></tr>
             </tbody>
         </table>
@@ -55,7 +54,7 @@
         <form id="enrollment-form" class="dialog-body">
             <h2 id="enrollment-dialog-title">履修者を設定</h2>
             <p id="enrollment-course" class="muted"></p>
-            <div id="enrollment-list" class="checkbox-list"></div>
+            <div id="enrollment-list" class="checkbox-list" role="group" aria-labelledby="enrollment-dialog-title" aria-busy="false"></div>
             <p class="muted input-help">履修から外しても、その学生の過去の出席記録は残ります。</p>
             <div id="enrollment-error" class="alert alert-error" role="alert" hidden></div>
             <div class="dialog-actions">
@@ -67,6 +66,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
 <script src="{{ url_for('static', path='js/admin.js') }}" defer></script>
 {% endblock %}
