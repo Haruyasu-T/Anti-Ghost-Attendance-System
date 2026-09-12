@@ -6,6 +6,8 @@
 const page = document.querySelector("[data-admin-console]");
 const errorBox = document.querySelector("#admin-error");
 const tbody = document.querySelector("#admin-courses");
+const newCourseButton = document.querySelector("#new-course-button");
+const retryButton = document.querySelector("#admin-retry");
 
 const courseDialog = document.querySelector("#course-dialog");
 const courseForm = document.querySelector("#course-form");
@@ -25,6 +27,17 @@ let teachers = [];
 let students = [];
 let editingCourse = null;
 let enrollingCourse = null;
+let enrollmentRequest = 0;
+let enrollmentReady = false;
+
+function setSaving(form, saving) {
+    form.dataset.saving = String(saving);
+    form.setAttribute("aria-busy", String(saving));
+    form.querySelectorAll("button, input, select").forEach((control) => {
+        control.disabled = saving;
+    });
+    form.querySelector('[type="submit"]').textContent = saving ? "保存中…" : "保存";
+}
 
 function csrfHeaders() {
     return {"Content-Type": "application/json", "X-CSRF-Token": page.dataset.csrfToken};
@@ -42,21 +55,32 @@ async function getJson(url) {
 
 async function send(url, method, body, box) {
     box.hidden = true;
-    const response = await fetch(url, {
-        method,
-        credentials: "same-origin",
-        headers: csrfHeaders(),
-        body: JSON.stringify(body),
-    });
-    if (response.ok) return response.json();
+    let response;
+    try {
+        response = await fetch(url, {
+            method,
+            credentials: "same-origin",
+            headers: csrfHeaders(),
+            body: JSON.stringify(body),
+        });
+    } catch (error) {
+        box.textContent = "通信できませんでした。通信状態を確認して、もう一度お試しください。";
+        box.hidden = false;
+        throw error;
+    }
+    if (response.ok) return;
+    if (response.status === 401) {
+        window.location.assign("/login");
+        throw new Error("unauthorized");
+    }
 
     let detail = "";
     try {
         detail = (await response.json()).detail || "";
     } catch (e) { /* JSONでない応答はメッセージなしで扱う */ }
 
-    if (response.status === 400) {
-        box.textContent = detail || "入力内容を確認してください。";
+    if (response.status === 400 || response.status === 422) {
+        box.textContent = typeof detail === "string" && detail ? detail : "入力内容を確認してください。";
     } else if (response.status === 403) {
         box.textContent = "権限がありません。";
     } else if (response.status === 404) {
@@ -141,6 +165,7 @@ function updateTeacherWarning() {
 }
 
 function openCourseDialog(course) {
+    if (!teachers.length) return;
     editingCourse = course || null;
     courseTitle.textContent = course ? "授業を編集" : "授業を追加";
     courseName.value = course ? course.name : "";
@@ -152,18 +177,31 @@ function openCourseDialog(course) {
 }
 
 async function openEnrollmentDialog(course) {
+    const request = ++enrollmentRequest;
+    enrollmentReady = false;
     enrollingCourse = course;
     enrollmentCourse.textContent = course.name;
     enrollmentError.hidden = true;
     enrollmentList.replaceChildren();
+    enrollmentList.textContent = "履修者を読み込んでいます…";
+    enrollmentList.setAttribute("aria-busy", "true");
+    document.querySelector("#enrollment-submit").disabled = true;
+    enrollmentDialog.showModal();
 
-    let enrolled = [];
+    let enrolled;
     try {
         enrolled = await getJson(`/admin/courses/${course.id}/enrollments`);
     } catch (e) {
-        enrollmentError.textContent = "履修者を読み込めませんでした。";
+        if (request !== enrollmentRequest || !enrollmentDialog.open) return;
+        enrollmentList.replaceChildren();
+        enrollmentList.setAttribute("aria-busy", "false");
+        enrollmentError.textContent = "履修者を読み込めませんでした。閉じてから、もう一度開いてください。";
         enrollmentError.hidden = false;
+        return;
     }
+    if (request !== enrollmentRequest || !enrollmentDialog.open) return;
+    enrollmentList.replaceChildren();
+    enrollmentList.setAttribute("aria-busy", "false");
     const enrolledIds = new Set(enrolled.map((u) => u.id));
 
     for (const student of students) {
@@ -178,10 +216,15 @@ async function openEnrollmentDialog(course) {
         label.append(input, text);
         enrollmentList.append(label);
     }
-    enrollmentDialog.showModal();
+    if (!students.length) enrollmentList.textContent = "学生アカウントがまだありません。";
+    enrollmentReady = true;
+    document.querySelector("#enrollment-submit").disabled = false;
 }
 
 async function loadAll() {
+    newCourseButton.disabled = true;
+    retryButton.hidden = true;
+    tbody.setAttribute("aria-busy", "true");
     try {
         const [users, courses] = await Promise.all([
             getJson("/admin/users"),
@@ -191,10 +234,16 @@ async function loadAll() {
         students = users.filter((u) => u.role === "student");
         renderCourses(courses);
         errorBox.hidden = true;
+        newCourseButton.disabled = !teachers.length;
+        document.querySelector("#no-teachers").hidden = !!teachers.length;
     } catch (e) {
         if (e.message === "unauthorized") return;
-        errorBox.textContent = "読み込めませんでした。時間をおいて再度お試しください。";
+        tbody.replaceChildren();
+        errorBox.textContent = "読み込めませんでした。通信状態を確認して、再読み込みしてください。";
         errorBox.hidden = false;
+        retryButton.hidden = false;
+    } finally {
+        tbody.setAttribute("aria-busy", "false");
     }
 }
 
@@ -202,23 +251,39 @@ courseTeacher?.addEventListener("change", updateTeacherWarning);
 document.querySelector("#new-course-button")?.addEventListener("click", () => openCourseDialog(null));
 document.querySelector("#course-cancel")?.addEventListener("click", () => courseDialog.close());
 document.querySelector("#enrollment-cancel")?.addEventListener("click", () => enrollmentDialog.close());
+enrollmentDialog?.addEventListener("close", () => {
+    ++enrollmentRequest;
+    enrollmentReady = false;
+});
+retryButton?.addEventListener("click", loadAll);
+for (const [dialog, form] of [[courseDialog, courseForm], [enrollmentDialog, enrollmentForm]]) {
+    dialog?.addEventListener("cancel", (event) => {
+        if (form.dataset.saving === "true") event.preventDefault();
+    });
+}
 
 courseForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (courseForm.dataset.saving === "true") return;
+    courseName.value = courseName.value.trim();
     if (!courseForm.reportValidity()) return;
     const body = {name: courseName.value.trim(), teacher_id: Number(courseTeacher.value)};
     const url = editingCourse ? `/admin/courses/${editingCourse.id}` : "/admin/courses";
+    setSaving(courseForm, true);
     try {
         await send(url, editingCourse ? "PUT" : "POST", body, courseError);
         courseDialog.close();
         await loadAll();
     } catch (e) { /* メッセージは send が表示済み */ }
+    finally { setSaving(courseForm, false); }
 });
 
 enrollmentForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!enrollmentReady || enrollmentForm.dataset.saving === "true") return;
     const checked = [...enrollmentList.querySelectorAll("input:checked")]
         .map((input) => Number(input.value));
+    setSaving(enrollmentForm, true);
     try {
         await send(
             `/admin/courses/${enrollingCourse.id}/enrollments`,
@@ -229,6 +294,7 @@ enrollmentForm?.addEventListener("submit", async (event) => {
         enrollmentDialog.close();
         await loadAll();
     } catch (e) { /* メッセージは send が表示済み */ }
+    finally { setSaving(enrollmentForm, false); }
 });
 
 if (page && tbody) loadAll();
