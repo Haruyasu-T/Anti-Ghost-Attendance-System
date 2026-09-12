@@ -1,8 +1,5 @@
 {% extends "base.html" %}
 {% block title %}授業管理 | 出席管理システム{% endblock %}
-{% block header_actions %}
-<button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
-{% endblock %}
 {% block content %}
 <section data-admin-console data-csrf-token="{{ csrf_token }}">
     <div class="page-heading">
@@ -67,6 +64,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
 <script src="{{ url_for('static', path='js/admin.js') }}" defer></script>
 {% endblock %}
