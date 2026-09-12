@@ -152,7 +152,8 @@ def student_home_view(
     return templates.TemplateResponse(
         request=request,
         name="home.html",
-        context={"display_name": user.display_name},
+        context={"display_name": user.display_name,
+                 "csrf_token": csrf_token_for_request(request)},
     )
 
 
@@ -201,7 +202,10 @@ def history_page(
     user: models.User = Depends(require_role("student")),
 ):
     """自分の出席履歴画面．表示データは GET /me/attendances から取得する."""
-    return templates.TemplateResponse(request=request, name="history.html", context={})
+    return templates.TemplateResponse(
+        request=request, name="history.html",
+        context={"csrf_token": csrf_token_for_request(request)},
+    )
 
 
 # ---------------------------------------------------------------- スキーマ
