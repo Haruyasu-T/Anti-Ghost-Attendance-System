@@ -1,8 +1,5 @@
 {% extends "base.html" %}
 {% block title %}担当授業 | 出席管理システム{% endblock %}
-{% block header_actions %}
-<button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
-{% endblock %}
 {% block content %}
 {# 受付時間帯の分数はサーバーから受け取る．JSに直書きすると .env で値を
    変えたときに表示だけが古くなり，教員が見ている時間帯と実際の判定がずれる． #}
@@ -45,6 +42,5 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
 <script src="{{ url_for('static', path='js/teacher-courses.js') }}" defer></script>
 {% endblock %}

@@ -1,8 +1,5 @@
 {% extends "base.html" %}
 {% block title %}学生ホーム | 出席管理システム{% endblock %}
-{% block header_actions %}
-<button class="btn btn-quiet btn-small" type="button" data-logout>ログアウト</button>
-{% endblock %}
 {% block content %}
 <section class="page-heading">
     <p class="eyebrow">学生ホーム</p>
@@ -20,5 +17,4 @@
 </nav>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', path='js/common.js') }}" defer></script>
 {% endblock %}
