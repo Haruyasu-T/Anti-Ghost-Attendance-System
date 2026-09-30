@@ -16,12 +16,19 @@ function parsePayload(value) {
     return null;
   }
 }
+// サーバーは拒否の理由を detail に入れて返す（FastAPI の HTTPException の形式）。
+// 以前は message を読んでいたため、学外からのアクセスも期限切れのQRも
+// 同じ文言になり、学生にも我々にも原因が分からなかった。
+// 理由が分かる文言はそのまま出し、無いときだけ汎用の文言に落とす。
+function detailOf(data) {
+  return data && typeof data.detail === "string" && data.detail ? data.detail : "";
+}
 function messageFor(status, data) {
   if (status === 401) return "ログインし直してから、もう一度読み取ってください。";
-  if (status === 403) return (data && data.message) || "このQRでは出席登録できませんでした。";
+  if (status === 403) return detailOf(data) || "このQRでは出席登録できませんでした。";
   if (status === 409)
-    return (data && data.message) || "すでに登録済み、または受付が終了しています。";
-  return "出席登録に失敗しました。もう一度お試しください。";
+    return detailOf(data) || "すでに登録済み、または受付が終了しています。";
+  return detailOf(data) || "出席登録に失敗しました。もう一度お試しください。";
 }
 async function submit(payload) {
   if (submitting) return;
