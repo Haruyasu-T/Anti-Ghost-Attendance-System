@@ -3,15 +3,18 @@
     python -m scripts.init_db      # 先にテーブルを作る
     python -m scripts.seed_data
 
-パスワードはこのファイルに書かない．環境変数 SEED_PASSWORD があればそれを使い，
-無ければ毎回ランダムに生成して標準出力に1度だけ表示する．
+管理者1名・教員1名・学生15名・授業1つを作る．人数は環境変数で変えられる
+（`SEED_STUDENT_COUNT` など）．
 
-固定値を書くと，それがそのままリポジトリに残り，デプロイ先にも同じ
-パスワードのアカウントが出来上がる．「開発用の初期値」がそのまま本番に
-残るのは典型的な事故なので，最初から書けない形にしておく（decisions.md D-1
-で TOKEN_SECRET に既定値を置かなかったのと同じ理由）．
+**パスワードはアカウントごとに別々に生成する．** 実機テストでは学生役に
+アカウントを配るので，共通にすると学生役が教員や管理者にもログインできて
+しまう．そうなると「学生は教員用APIを叩けない」という確認が成立しない．
 
-学籍番号・氏名はすべて架空の値．実在の学生の情報は入れない．
+生成した値はこのファイルにもDBにも平文で残らない．実行時に1度だけ表示する
+ので，その場で控えること．忘れた場合は作り直しになる（DBにはハッシュしか
+無いので元の値は取り出せない）．
+
+学籍番号・氏名はすべて架空の値．実在の人の情報は入れない．
 """
 
 import os
@@ -23,72 +26,63 @@ from sqlalchemy.orm import Session
 from app import models, security
 from app.db import get_engine
 
-# 教員2名にしているのは「他の教員の授業は見えない」ことを試せるようにするため．
-# 1名だけだと，認可が壊れていても気付けない．
-TEACHERS = [
-    ("T0001", "情報 太郎", "情報セキュリティ"),
-    ("T0002", "工学 花子", "ネットワーク基礎"),
-]
+# 手で入力してもらうので、見間違えやすい文字（0 O o 1 l I）を外す．
+_PASSWORD_ALPHABET = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_PASSWORD_LENGTH = 12
 
-# S0005 はどの授業にも履修登録しない．未履修者が出席登録を試みたときに
-# 拒否されることを確認するために残しておく（test-report.md の攻撃テスト用）．
-STUDENTS = [
-    ("S0001", "学生 一郎"),
-    ("S0002", "学生 二郎"),
-    ("S0003", "学生 三郎"),
-    ("S0004", "学生 四郎"),
-    ("S0005", "学生 五郎"),
-]
-UNENROLLED = {"S0005"}
-
-# 管理者1名．授業と履修の割り当てだけを行い，出席記録には触れない．
-# 本番で使うアカウントをこのスクリプトで作らないこと．ここで作るのは
-# 動作確認用で，パスワードは他のアカウントと共通になっている．
-ADMINS = [("A0001", "管理 事務")]
+ADMIN_COUNT = int(os.environ.get("SEED_ADMIN_COUNT", "1"))
+TEACHER_COUNT = int(os.environ.get("SEED_TEACHER_COUNT", "1"))
+STUDENT_COUNT = int(os.environ.get("SEED_STUDENT_COUNT", "15"))
+COURSE_NAME = os.environ.get("SEED_COURSE_NAME", "情報セキュリティ")
 
 
-def seed(db: Session, password: str) -> None:
-    """管理者1名・教員2名・学生5名・授業2つ・履修関係を作る."""
-    password_hash = security.hash_password(password)
+def new_password() -> str:
+    return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
 
-    for login_id, display_name in ADMINS:
-        db.add(models.User(
+
+def seed(db: Session) -> dict:
+    """初期データを投入し、{ログインID: パスワード} を返す.
+
+    返り値は表示のためだけに使う．保存しないこと．
+    """
+    credentials: dict = {}
+
+    def add_user(login_id: str, role: str, display_name: str) -> models.User:
+        password = new_password()
+        user = models.User(
             login_id=login_id,
-            role="admin",
+            role=role,
             display_name=display_name,
-            password_hash=password_hash,
-        ))
-    db.flush()
-
-    teachers = {}
-    for login_id, display_name, course_name in TEACHERS:
-        teacher = models.User(
-            login_id=login_id,
-            role="teacher",
-            display_name=display_name,
-            password_hash=password_hash,
+            password_hash=security.hash_password(password),
         )
-        db.add(teacher)
+        db.add(user)
         db.flush()
-        course = models.Course(name=course_name, teacher_id=teacher.id)
+        credentials[login_id] = password
+        return user
+
+    for i in range(1, ADMIN_COUNT + 1):
+        add_user(f"A{i:04d}", "admin", f"管理者{i:02d}")
+
+    # 授業は教員ごとに1つ作る．担当教員が違う授業を用意しておくと、
+    # 「他の教員の授業は見えない」ことを試せる（教員が1名なら試せない）。
+    courses = []
+    for i in range(1, TEACHER_COUNT + 1):
+        teacher = add_user(f"T{i:04d}", "teacher", f"教員{i:02d}")
+        name = COURSE_NAME if i == 1 else f"{COURSE_NAME}（{i}）"
+        course = models.Course(name=name, teacher_id=teacher.id)
         db.add(course)
         db.flush()
-        teachers[login_id] = course
+        courses.append(course)
 
-    first_course = teachers["T0001"]
-    for login_id, display_name in STUDENTS:
-        student = models.User(
-            login_id=login_id,
-            role="student",
-            display_name=display_name,
-            password_hash=password_hash,
-        )
-        db.add(student)
-        db.flush()
-        if login_id not in UNENROLLED:
-            db.add(models.Enrollment(course_id=first_course.id, user_id=student.id))
+    # 学生は全員、最初の授業に履修登録する．未履修者の拒否を試したくなったら、
+    # 管理画面の「履修者」から外せばよい（アカウントを作り直す必要はない）。
+    for i in range(1, STUDENT_COUNT + 1):
+        student = add_user(f"S{i:04d}", "student", f"学生{i:02d}")
+        if courses:
+            db.add(models.Enrollment(course_id=courses[0].id, user_id=student.id))
 
     db.commit()
+    return credentials
 
 
 def main() -> int:
@@ -106,15 +100,21 @@ def main() -> int:
             )
             return 1
 
-        password = os.environ.get("SEED_PASSWORD") or secrets.token_urlsafe(12)
-        seed(db, password)
+        credentials = seed(db)
 
     print("初期データを投入しました。")
-    print(f"  管理者 {', '.join(a[0] for a in ADMINS)}")
-    print(f"  教員   {', '.join(t[0] for t in TEACHERS)}")
-    print(f"  学生   {', '.join(s[0] for s in STUDENTS)}"
-          f"（{', '.join(sorted(UNENROLLED))} は未履修）")
-    print(f"  パスワード（全員共通・この表示限り）  {password}")
+    print(f"  授業：{COURSE_NAME}（学生は全員この授業に履修登録済み）")
+    print()
+    print("  パスワードはこの表示限りです。控えてから閉じてください。")
+    print("  DBにはハッシュしか保存していないので、後から取り出せません。")
+    print()
+    print("  ログインID  パスワード")
+    print("  ----------  ------------")
+    for login_id in sorted(credentials):
+        print(f"  {login_id:<10}  {credentials[login_id]}")
+    print()
+    print("  学生役に配るのは S で始まるものだけにしてください。")
+    print("  教員（T）と管理者（A）を渡すと、学生役が出席を操作できてしまいます。")
     return 0
 
 
