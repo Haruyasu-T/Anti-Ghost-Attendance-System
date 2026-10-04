@@ -174,3 +174,23 @@ def test_teacher_courses_page_passes_the_attendance_windows(tmp_path):
     assert 'data-present-before-minutes="5"' in response.text
     assert 'data-present-after-minutes="5"' in response.text
     assert 'data-late-until-minutes="20"' in response.text
+
+
+def test_qr_page_restores_saved_start_time_and_scan_round(tmp_path):
+    db, ids = _fixture(tmp_path)
+    session_id = _add_session(db, ids["my_course"])
+    sess = db.get(models.AttendanceSession, session_id)
+    sess.required_scan_count = 3
+    sess.scheduled_start_at = "2026-10-04T01:00:00.000Z"
+    db.commit()
+    try:
+        response = _client(db, "T0001").get(f"/attendance-sessions/{session_id}/qr")
+        assert response.status_code == 200
+        assert 'id="scan-round">3回目' in response.text
+        assert '2026-10-04 10:00 JST' in response.text
+        assert 'id="rescan-button"' in response.text
+        assert '4回目のQRを表示' in response.text
+        assert db.get(models.AttendanceSession, session_id).scheduled_start_at == "2026-10-04T01:00:00.000Z"
+    finally:
+        app.dependency_overrides.clear()
+        db.close()

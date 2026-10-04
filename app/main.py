@@ -725,6 +725,9 @@ def teacher_qr_view(
             "session_id": sess.id,
             "csrf_token": csrf_token_for_request(request),
             "course_name": course.name if course is not None else None,
+            "required_scan_count": sess.required_scan_count,
+            "scheduled_start_display": security.from_iso(sess.scheduled_start_at)
+                .astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M JST"),
         },
     )
 
@@ -747,13 +750,17 @@ def list_attendance_session_attendances(
 ):
     course = db.get(models.Course, sess.course_id)
 
-    # 履修者を login_id 順に取得する．Enrollment 単体には login_id が無いので
-    # User と結合する．表示順を安定させるため login_id でソートしておく
-    # （画面側でソートし直す前提を作らない）．
+    # 現在の履修者に加え、この回に記録がある学生も残す。
+    # 名簿の再設定で過去の出席記録が画面から消えないようにする。
+    enrolled_ids = db.query(models.Enrollment.user_id).filter(
+        models.Enrollment.course_id == sess.course_id
+    )
+    recorded_ids = db.query(models.Attendance.user_id).filter(
+        models.Attendance.attendance_session_id == sess.id
+    )
     enrolled_users = (
         db.query(models.User)
-        .join(models.Enrollment, models.Enrollment.user_id == models.User.id)
-        .filter(models.Enrollment.course_id == sess.course_id)
+        .filter(models.User.id.in_(enrolled_ids.union(recorded_ids)))
         .order_by(models.User.login_id)
         .all()
     )
@@ -1039,7 +1046,15 @@ def correct_attendance(
             detail="status は present / late / absent のいずれかにしてください",
         )
 
-    # 対象の学生がこの授業を履修しているか確認する（未履修なら400．api-design.md）．
+    # 履修解除後も、この回に既存記録がある学生は理由付きで訂正できる。
+    existing = (
+        db.query(models.Attendance)
+        .filter(
+            models.Attendance.attendance_session_id == sess.id,
+            models.Attendance.user_id == user_id,
+        )
+        .one_or_none()
+    )
     # Enrollment.user_id は users.id への外部キーなので，この行が取れれば
     # 対象ユーザーの実在も同時に保証される．
     enrolled = (
@@ -1050,7 +1065,7 @@ def correct_attendance(
         )
         .one_or_none()
     )
-    if enrolled is None:
+    if enrolled is None and existing is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="この授業の履修者ではありません",
@@ -1059,14 +1074,6 @@ def correct_attendance(
     client_ip = security.get_client_ip(request)
     now = datetime.now(timezone.utc)
 
-    existing = (
-        db.query(models.Attendance)
-        .filter(
-            models.Attendance.attendance_session_id == sess.id,
-            models.Attendance.user_id == user_id,
-        )
-        .one_or_none()
-    )
     # before_status は，記録が無かった場合はNULL（api-design.md）．
     before_status = existing.status if existing is not None else None
 
