@@ -25,3 +25,10 @@ jobs:
           TOKEN_SECRET: dummy-secret-for-ci-only
           CAMPUS_IP_RANGES: 192.168.0.0/16
         run: pytest -v
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Verify QR actions
+        run: node tests/test_teacher_qr_js.cjs
