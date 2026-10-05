@@ -7,6 +7,7 @@ URLを直接叩かれれば意味がないので，すべてAPIに対して確�
 
 import datetime as dt
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -263,7 +264,8 @@ def test_enrollments_are_replaced_by_the_given_set(tmp_path):
     assert emptied == []
 
 
-def test_removing_an_enrollment_keeps_the_attendance_record(tmp_path):
+@pytest.mark.parametrize("session_status", ["open", "closed"])
+def test_removing_an_enrollment_keeps_the_attendance_record(tmp_path, session_status):
     """履修から外しても過去の出席記録は消さないこと.
 
     記録を消す権限を管理者に持たせない。名簿から外れるだけ。
@@ -272,7 +274,8 @@ def test_removing_an_enrollment_keeps_the_attendance_record(tmp_path):
     now = security.to_iso(dt.datetime.now(dt.timezone.utc))
     sess = models.AttendanceSession(
         course_id=ids["course"], scheduled_start_at=now, started_at=now,
-        status="open", required_scan_count=1,
+        status=session_status, closed_at=now if session_status == "closed" else None,
+        required_scan_count=1,
         token_salt=security.new_token_salt(), created_by=ids["t1"],
     )
     db.add(sess)
@@ -291,11 +294,30 @@ def test_removing_an_enrollment_keeps_the_attendance_record(tmp_path):
         )
         remaining = db.query(models.Attendance).filter(
             models.Attendance.user_id == ids["s1"]).count()
+        teacher = _client(db, "T0001")
+        rows = teacher.get(
+            f"/attendance-sessions/{sess.id}/attendances"
+        ).json()["rows"]
+        corrected = teacher.put(
+            f"/attendance-sessions/{sess.id}/attendances/{ids['s1']}",
+            json={"status": "late", "reason": "履修解除後の記録確認"},
+            headers=_csrf(teacher),
+        )
+        rejected = teacher.put(
+            f"/attendance-sessions/{sess.id}/attendances/{ids['s2']}",
+            json={"status": "present", "reason": "未履修者への追加は不可"},
+            headers=_csrf(teacher),
+        )
+        correction = db.query(models.ManualCorrection).one()
+        assert (correction.before_status, correction.after_status) == ("present", "late")
     finally:
         app.dependency_overrides.clear()
         db.close()
 
     assert remaining == 1
+    assert [(row["user_id"], row["status"]) for row in rows] == [(ids["s1"], "present")]
+    assert corrected.status_code == 200
+    assert rejected.status_code == 400
 
 
 def test_course_list_reports_counts_for_the_screen(tmp_path):

@@ -92,6 +92,34 @@ def test_rows_carry_the_user_id_the_edit_button_needs(tmp_path):
     assert {row["user_id"] for row in response.json()["rows"]} == {ids["s1"], ids["s2"]}
 
 
+def test_changing_attendance_windows_does_not_reclassify_saved_records(tmp_path, monkeypatch):
+    from app.config import get_settings
+
+    db, ids = _fixture(tmp_path)
+    try:
+        sess = db.get(models.AttendanceSession, ids["session"])
+        record = db.query(models.Attendance).one()
+        # 初回登録は開始3分後。元の基準では出席だが、変更後は受付時間外。
+        sess.scheduled_start_at = security.to_iso(
+            security.from_iso(record.first_recorded_at) - dt.timedelta(minutes=3)
+        )
+        db.commit()
+        original = sess.scheduled_start_at
+        monkeypatch.setenv("PRESENT_AFTER_MINUTES", "0")
+        monkeypatch.setenv("LATE_UNTIL_MINUTES", "1")
+        get_settings.cache_clear()
+        response = _rows(db, ids["session"])
+        assert response.status_code == 200
+        rows = {row["user_id"]: row for row in response.json()["rows"]}
+        assert rows[ids["s1"]]["status"] == "present"
+        assert db.get(models.AttendanceSession, ids["session"]).scheduled_start_at == original
+        assert (record.status, record.record_source) == ("present", "auto")
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+        get_settings.cache_clear()
+
+
 def test_row_shape_matches_what_the_screen_reads(tmp_path):
     """attendance-list.js が読む値が全部揃っていること."""
     db, ids = _fixture(tmp_path)
