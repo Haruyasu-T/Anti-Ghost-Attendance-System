@@ -1,0 +1,40 @@
+# ローカル開発用のMySQL．
+#
+#   docker compose up -d --wait     # 起動し，healthy になるまで待つ
+#   docker compose down             # 停止（データは残る）
+#   docker compose down -v          # 停止してデータも消す（作り直したいとき）
+#
+# パスワードはこのファイルに書かず，`.env` から読む（`.env` は .gitignore 済み）．
+#   MYSQL_ROOT_PASSWORD=...
+#   MYSQL_PASSWORD=...
+#
+# 注意：MYSQL_* の環境変数が効くのは，データ用ボリュームが空の最初の起動だけ．
+# 後から .env のパスワードを変えても反映されない．変えたいときは `down -v` で作り直す．
+
+services:
+  db:
+    image: mysql:8.0   # 8.0.17 以上が必須（models.py の前提）
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_bin
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?.env に MYSQL_ROOT_PASSWORD を設定してください}
+      MYSQL_DATABASE: attendance
+      MYSQL_USER: app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?.env に MYSQL_PASSWORD を設定してください}
+    ports:
+      # 自分のPCからだけ繋がるようにする．"3306:3306" だけだと全インターフェースに公開される
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      # 初期化中の一時サーバーはTCPを待ち受けないので，-h 127.0.0.1 を付けると
+      # 「本当に接続を受け付けられる状態」になってから healthy になる
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  db-data:

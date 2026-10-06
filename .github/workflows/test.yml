@@ -6,8 +6,31 @@ on:
   pull_request:
 
 jobs:
-  pytest:
+  test:
     runs-on: ubuntu-latest
+
+    # CIのパスワードは使い捨てのDBにしか効かないので，ここに直書きしてよい．
+    # （本物の秘密鍵は絶対に書かない．本番や開発用DBと同じ値も使わない．GitHub Secretsも使わない）
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-only-root-password
+          MYSQL_DATABASE: attendance_test
+        ports:
+          - 3306:3306
+        # サービスコンテナは起動直後は接続を受け付けないので，healthy を待たせる
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=3s
+          --health-timeout=3s
+          --health-retries=30
+
+    env:
+      DATABASE_URL: mysql+pymysql://root:ci-only-root-password@127.0.0.1:3306/attendance_test?charset=utf8mb4
+      TOKEN_SECRET: ci-only-token-secret
+      CAMPUS_IP_RANGES: 127.0.0.1/32,192.168.0.0/16
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,10 +43,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        # テスト実行用のダミー値．本物の秘密鍵は絶対に書かない（GitHub Secretsも使わない）
-        env:
-          TOKEN_SECRET: dummy-secret-for-ci-only
-          CAMPUS_IP_RANGES: 192.168.0.0/16
         run: pytest -v
 
       - uses: actions/setup-node@v4
