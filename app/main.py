@@ -44,7 +44,7 @@ from app.auth import (
     require_role,
     require_session_owner,
 )
-from app.config import get_settings
+from app.config import DISPLAY_TIMEZONE, get_settings
 from app.db import get_db, get_session_factory
 from scripts.init_db import create_tables
 
@@ -727,7 +727,7 @@ def teacher_qr_view(
             "course_name": course.name if course is not None else None,
             "required_scan_count": sess.required_scan_count,
             "scheduled_start_display": security.from_iso(sess.scheduled_start_at)
-                .astimezone(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M JST"),
+                .astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z"),
         },
     )
 
