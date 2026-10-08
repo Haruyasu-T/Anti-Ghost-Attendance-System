@@ -16,9 +16,13 @@ from __future__ import annotations
 import ipaddress
 import os
 from dataclasses import dataclass
+from datetime import timedelta, timezone
 from functools import lru_cache
 
 from dotenv import load_dotenv
+
+# 画面表示用のタイムゾーン。DB保存・出席判定にはUTCを使う。
+DISPLAY_TIMEZONE = timezone(timedelta(hours=9), name="JST")
 
 # .env があれば読み込む（既に設定済みの環境変数は上書きしない）．
 # 本番では .env を置かず，ホスティング側の環境変数で渡す想定．
