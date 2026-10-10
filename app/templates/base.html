@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="light">
     <title>{% block title %}出席管理システム{% endblock %}</title>
+    {# SVGを優先し、対応していないブラウザにはPNGを使わせる。
+       iOSのホーム画面用はOS側が角を丸めるので、角丸なしの四角を渡す。 #}
+    <link rel="icon" href="{{ url_for('static', path='icon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', path='favicon-32.png') }}" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="{{ url_for('static', path='icon-180.png') }}">
+    <meta name="theme-color" content="#155eef">
     <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
@@ -12,7 +18,10 @@
     <a class="skip-link" href="#main-content">本文へ移動</a>
     {% block header %}
     <header class="site-header">
-        <a class="brand" href="/">出席管理</a>
+        <a class="brand" href="/">
+            <img src="{{ url_for('static', path='icon.svg') }}" alt="" width="24" height="24">
+            <span>出席管理</span>
+        </a>
         {% block header_actions %}
         {% if csrf_token %}
         <button class="btn btn-quiet btn-small" type="button" data-logout data-csrf-token="{{ csrf_token }}">ログアウト</button>
