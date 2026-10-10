@@ -1,14 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-label="AGAS 出席管理システム">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 172 64" role="img" aria-label="AGAS">
   <title>AGAS</title>
-  <!-- 横長のロゴ。READMEや資料の見出しに使う。
-       アイコンと同じ位置検出パターンを左に置き、右に文字を並べる。 -->
-  <rect width="64" height="64" rx="14" fill="#155eef"/>
-  <rect x="14" y="14" width="36" height="36" fill="none" stroke="#fff" stroke-width="6"/>
-  <rect x="23" y="23" width="18" height="18" fill="#fff"/>
-  <text x="80" y="36" fill="#172033"
-        font-family="Segoe UI, Hiragino Kaku Gothic ProN, Meiryo, sans-serif"
-        font-size="26" font-weight="800" letter-spacing="1.5">AGAS</text>
-  <text x="81" y="52" fill="#607089"
-        font-family="Segoe UI, Hiragino Kaku Gothic ProN, Meiryo, sans-serif"
-        font-size="11" font-weight="600" letter-spacing="0.6">QR出席管理システム</text>
+  <!-- A・A・S はフォントを使わず図形で描く。環境によって字体が変わらないようにするため。
+       線の太さと円の作りを G と揃えてある。字間は線の太さを含めた見た目の縁で等間隔にした。 -->
+  <g fill="none" stroke="#155eef" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 51 L19 13 L34 51"/><path d="M8 41 H30"/>
+    <g transform="translate(7 0)"><path d="M92 51 L107 13 L122 51"/><path d="M96 41 H118"/></g>
+    <g transform="translate(16.5 0)">
+      <path d="M148 21 C148 15.5 142 13 137 13 C130 13 126 17.5 126 22.5
+               C126 27.5 130 30.5 137 32.5 C144 34.5 148 37.5 148 42.5
+               C148 47.5 143 51 137 51 C131 51 126 48 126 43"/>
+    </g>
+  </g>
+  <!-- G＝封じ込められたお化け。斜線の端は butt（round だと円からはみ出す） -->
+  <g transform="translate(34.5 0)">
+    <path d="M22 46 V33 A10 10 0 0 1 42 33 V46 L37 41.5 L32 46 L27 41.5 Z" fill="#0b1220"/>
+    <circle cx="28" cy="27" r="2.3" fill="#fff"/>
+    <circle cx="36" cy="27" r="2.3" fill="#fff"/>
+    <path d="M50.6 26.5 A19 19 0 1 0 50.6 37.5 L14 25.95" fill="none" stroke="#ff3b30"
+          stroke-width="5.5" stroke-linecap="butt" stroke-linejoin="miter"/>
+  </g>
 </svg>
