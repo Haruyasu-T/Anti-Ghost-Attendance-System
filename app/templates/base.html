@@ -7,11 +7,11 @@
     <title>{% block title %}出席管理システム{% endblock %}</title>
     {# SVGを優先し、対応していないブラウザにはPNGを使わせる。
        iOSのホーム画面用はOS側が角を丸めるので、角丸なしの四角を渡す。 #}
-    <link rel="icon" href="{{ url_for('static', path='icon.svg') }}" type="image/svg+xml">
-    <link rel="icon" href="{{ url_for('static', path='favicon-32.png') }}" sizes="32x32" type="image/png">
-    <link rel="apple-touch-icon" href="{{ url_for('static', path='icon-180.png') }}">
+    <link rel="icon" href="{{ static_url('icon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ static_url('favicon-32.png') }}" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="{{ static_url('icon-180.png') }}">
     <meta name="theme-color" content="#6d28d9">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    <link rel="stylesheet" href="{{ static_url('css/style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -20,7 +20,7 @@
     <header class="site-header">
         <a class="brand" href="/">
             {# ロゴの中に AGAS の文字が入っているので、代わりの文字は alt に持たせる #}
-            <img src="{{ url_for('static', path='logo.svg') }}" alt="AGAS 出席管理" width="106" height="28">
+            <img src="{{ static_url('logo.svg') }}" alt="AGAS 出席管理" width="106" height="28">
         </a>
         {% block header_actions %}
         {% if csrf_token %}
@@ -33,7 +33,7 @@
         {% block content %}{% endblock %}
     </main>
     <div id="live-region" class="sr-only" aria-live="polite"></div>
-    <script src="{{ url_for('static', path='js/common.js') }}" defer></script>
+    <script src="{{ static_url('js/common.js') }}" defer></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>
