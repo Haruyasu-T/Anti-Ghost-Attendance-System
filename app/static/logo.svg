@@ -1,22 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 172 64" role="img" aria-label="AGAS">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 242 64" role="img" aria-label="AGAS">
   <title>AGAS</title>
-  <!-- A・A・S はフォントを使わず図形で描く。環境によって字体が変わらないようにするため。
-       線の太さと円の作りを G と揃えてある。字間は線の太さを含めた見た目の縁で等間隔にした。 -->
-  <g fill="none" stroke="#155eef" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M4 51 L19 13 L34 51"/><path d="M8 41 H30"/>
-    <g transform="translate(7 0)"><path d="M92 51 L107 13 L122 51"/><path d="M96 41 H118"/></g>
-    <g transform="translate(16.5 0)">
-      <path d="M148 21 C148 15.5 142 13 137 13 C130 13 126 17.5 126 22.5
-               C126 27.5 130 30.5 137 32.5 C144 34.5 148 37.5 148 42.5
-               C148 47.5 143 51 137 51 C131 51 126 48 126 43"/>
-    </g>
+  <!-- アイコン ＋ AGAS の文字。
+       文字はフォントを使わず図形で描いてある（環境によって字体が変わらないようにするため）。
+       G はアイコンと同じお化けで、線の太さだけ他の字に合わせて細くしてある。
+       そのため切り込みの座標もアイコンとは別の値になっている。 -->
+  <defs>
+    <linearGradient id="logo-bg" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#0b1220"/><stop offset="1" stop-color="#3b1d7a"/>
+    </linearGradient>
+    <linearGradient id="logo-sq" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#a855f7"/><stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="logo-g" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff6b35"/><stop offset="1" stop-color="#e01b24"/>
+    </linearGradient>
+    <radialGradient id="logo-hl" cx="0.26" cy="0.18" r="0.85">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <!-- アイコン用（線7） -->
+    <mask id="logo-notch"><rect width="96" height="96" fill="#fff"/>
+      <polygon points="3.13,8.01 41.32,46.20 40.26,47.26 2.07,9.07" fill="#000"/></mask>
+    <!-- 文字のG用（線5.64）。斜線のふちから切り込みが始まるように座標が違う -->
+    <mask id="logo-notch-g"><rect width="96" height="96" fill="#fff"/>
+      <polygon points="3.60,7.54 41.79,45.72 40.73,46.78 2.54,8.60" fill="#000"/></mask>
+  </defs>
+
+  <g transform="scale(0.666667)">
+    <rect width="96" height="96" rx="20" fill="url(#logo-bg)"/>
+    <rect width="96" height="96" rx="20" fill="url(#logo-hl)"/>
+    <path d="M14 14 L82 82" fill="none" stroke="url(#logo-g)" stroke-width="7" stroke-linecap="butt"/>
+    <path d="M62.14 62.14 L57.43 68 L52.71 62.14 L48 68 L43.29 62.14 L38.57 68 L33.86 62.14
+             A20 20 0 1 1 67.56 52.16"
+          fill="none" stroke="url(#logo-g)" stroke-width="7"
+          stroke-linecap="butt" stroke-linejoin="round" mask="url(#logo-notch)"/>
+    <path d="M22 12 H74 A10 10 0 0 1 84 22 V74 A10 10 0 0 1 74 84
+             H22 A10 10 0 0 1 12 74 V22 A10 10 0 0 1 22 12 Z"
+          fill="none" stroke="url(#logo-sq)" stroke-width="7"/>
+    <circle cx="41" cy="40" r="3.2" fill="#fff"/>
+    <circle cx="56" cy="40" r="3.2" fill="#fff"/>
   </g>
-  <!-- G＝封じ込められたお化け。斜線の端は butt（round だと円からはみ出す） -->
-  <g transform="translate(34.5 0)">
-    <path d="M22 46 V33 A10 10 0 0 1 42 33 V46 L37 41.5 L32 46 L27 41.5 Z" fill="#0b1220"/>
-    <circle cx="28" cy="27" r="2.3" fill="#fff"/>
-    <circle cx="36" cy="27" r="2.3" fill="#fff"/>
-    <path d="M50.6 26.5 A19 19 0 1 0 50.6 37.5 L14 25.95" fill="none" stroke="#ff3b30"
-          stroke-width="5.5" stroke-linecap="butt" stroke-linejoin="miter"/>
+
+  <g fill="none" stroke="#6d28d9" stroke-width="5.5"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M80.75 51 L95.75 13 L110.75 51"/><path d="M84.75 41 H106.75"/>
+    <path d="M170.75 51 L185.75 13 L200.75 51"/><path d="M174.75 41 H196.75"/>
+    <path d="M236.25 21 C236.25 15.5 229.43 13 223.75 13
+             C215.80 13 211.25 17.5 211.25 22.5
+             C211.25 27.5 215.80 30.5 223.75 32.5
+             C231.70 34.5 236.25 37.5 236.25 42.5
+             C236.25 47.5 230.57 51 223.75 51
+             C216.93 51 211.25 48 211.25 43"/>
+  </g>
+
+  <!-- 斜線・裾・輪は1本の線としてつなげてある（別々の線を突き合わせると継ぎ目が欠ける） -->
+  <g transform="translate(140.75 32) scale(0.975) translate(-48 -48)"
+     fill="none" stroke="#e01b24" stroke-width="5.64">
+    <path d="M33.86 33.86 L62.14 62.14
+             C60.47 63.81 59.78 66.04 57.43 66.04
+             C55.08 66.04 55.06 62.14 52.71 62.14
+             C50.36 62.14 50.36 66.04 48 66.04
+             C45.64 66.04 45.64 62.14 43.29 62.14
+             C40.94 62.14 40.92 66.04 38.57 66.04
+             C36.22 66.04 35.53 63.81 33.86 62.14
+             A20 20 0 1 1 67.56 52.16"
+          stroke-linecap="butt" stroke-linejoin="round" mask="url(#logo-notch-g)"/>
+    <circle cx="41" cy="40" r="3.2" fill="#0b1220" stroke="none"/>
+    <circle cx="56" cy="40" r="3.2" fill="#0b1220" stroke="none"/>
   </g>
 </svg>
