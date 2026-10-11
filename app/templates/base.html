@@ -19,8 +19,8 @@
     {% block header %}
     <header class="site-header">
         <a class="brand" href="/">
-            <img src="{{ url_for('static', path='icon.svg') }}" alt="" width="24" height="24">
-            <span>出席管理</span>
+            {# ロゴの中に AGAS の文字が入っているので、代わりの文字は alt に持たせる #}
+            <img src="{{ url_for('static', path='logo.svg') }}" alt="AGAS 出席管理" width="106" height="28">
         </a>
         {% block header_actions %}
         {% if csrf_token %}
