@@ -26,7 +26,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -34,6 +33,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, security
+from app.assets import VersionedStaticFiles, static_url
 from app.auth import (
     DEVICE_COOKIE,
     SESSION_COOKIE,
@@ -97,8 +97,11 @@ app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム", lifespan=lif
 # 足しても自動的に守られる状態にしておく（security-interface.md 参照）．
 app.add_middleware(CsrfMiddleware)
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", VersionedStaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+# テンプレートでは url_for('static', ...) ではなく static_url() を使う．
+# 中身が変わると URL も変わるので，古い JS や CSS がキャッシュから使われない（app/assets.py）．
+templates.env.globals["static_url"] = static_url
 
 # 画面ルートでも使うので、依存関数をここで1つ作って共有する．
 require_teacher = require_role("teacher")

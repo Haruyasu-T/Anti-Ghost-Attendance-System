@@ -7,4 +7,4 @@
 </section>
 <dialog id="correction-dialog"><form id="correction-form" class="dialog-body"><h2>出席記録を修正</h2><p id="correction-target"></p><input id="attendance-user-id" type="hidden"><label for="correction-status">出席区分</label><select id="correction-status" required><option value="present">出席</option><option value="late">遅刻</option><option value="absent">欠席</option></select><label for="correction-reason">修正理由（必須）</label><textarea id="correction-reason" required maxlength="500"></textarea><p class="alert alert-warning">この操作は、変更前後の値と理由を含めて記録されます。</p><div class="dialog-actions"><button class="btn btn-quiet" type="button" data-close-dialog>キャンセル</button><button class="btn btn-primary" type="submit">記録して修正</button></div></form></dialog>
 {% endblock %}
-{% block scripts %}<script src="{{ url_for('static', path='js/attendance-list.js') }}" defer></script>{% endblock %}
+{% block scripts %}<script src="{{ static_url('js/attendance-list.js') }}" defer></script>{% endblock %}
