@@ -298,3 +298,25 @@ enrollmentForm?.addEventListener("submit", async (event) => {
 });
 
 if (page && tbody) loadAll();
+
+const windowForm = document.querySelector("#attendance-window-form");
+windowForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (windowForm.dataset.saving === "true" || !windowForm.reportValidity()) return;
+    const box = document.querySelector("#attendance-window-error");
+    const saved = document.querySelector("#attendance-window-saved");
+    saved.hidden = true;
+    const body = Object.fromEntries(new FormData(windowForm));
+    for (const name of Object.keys(body)) body[name] = Number(body[name]);
+    if (body.late_until_minutes < body.present_after_minutes) {
+        box.textContent = "受付終了は出席扱いの終了以降にしてください。";
+        box.hidden = false;
+        return;
+    }
+    setSaving(windowForm, true);
+    try {
+        await send("/admin/attendance-window", "PUT", body, box);
+        saved.hidden = false;
+    } catch (e) { /* メッセージは send が表示済み */ }
+    finally { setSaving(windowForm, false); }
+});

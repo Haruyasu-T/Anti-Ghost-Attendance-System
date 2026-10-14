@@ -28,7 +28,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -105,6 +105,11 @@ templates.env.globals["static_url"] = static_url
 
 # 画面ルートでも使うので、依存関数をここで1つ作って共有する．
 require_teacher = require_role("teacher")
+
+
+def _attendance_window_settings(db: Session):
+    saved = db.get(models.AttendanceWindowSettings, 1)
+    return saved if saved is not None else get_settings()
 
 
 @app.get("/health")
@@ -1281,7 +1286,9 @@ def register_attendance(
     # 9. 受付時間帯の判定は1回目のみ．2回目以降は在室確認なので見ない．
     if scan_seq == 1:
         scheduled_start_at = security.from_iso(sess.scheduled_start_at)
-        classified = security.classify_attendance(scheduled_start_at, now)
+        classified = security.classify_attendance(
+            scheduled_start_at, now, settings=_attendance_window_settings(db),
+        )
         if classified is None:
             raise _reject_now(
                 status.HTTP_403_FORBIDDEN, "受付時間外です", "outside_window",
@@ -1509,6 +1516,7 @@ def list_courses(
 def teacher_courses_view(
     request: Request,
     user: models.User = Depends(require_teacher),
+    db: Session = Depends(get_db),
 ):
     """ログイン直後に教員が最初に見る画面.
 
@@ -1520,7 +1528,7 @@ def teacher_courses_view(
     `.env` で値を変えたときに画面の表示だけが古いまま残り，教員が見ている
     受付時間帯と実際の判定がずれる．誤入力を防ぐための表示が逆に誤解を生む．
     """
-    settings = get_settings()
+    settings = _attendance_window_settings(db)
     return templates.TemplateResponse(
         request=request,
         name="teacher_courses.html",
@@ -1557,6 +1565,40 @@ def teacher_courses_view(
 # 追跡ができなくなる．不要になった授業は残す．
 
 require_admin = require_role("admin")
+
+
+class AttendanceWindowRequest(BaseModel):
+    present_before_minutes: int = Field(ge=0, le=180, strict=True)
+    present_after_minutes: int = Field(ge=0, le=180, strict=True)
+    late_until_minutes: int = Field(ge=0, le=180, strict=True)
+
+
+@app.put("/admin/attendance-window")
+def admin_update_attendance_window(
+    payload: AttendanceWindowRequest,
+    request: Request,
+    user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if payload.late_until_minutes < payload.present_after_minutes:
+        raise HTTPException(status_code=400, detail="受付終了は出席扱いの終了以降にしてください")
+    before = _attendance_window_settings(db)
+    names = tuple(payload.model_dump())
+    old_values = {name: getattr(before, name) for name in names}
+    row = db.get(models.AttendanceWindowSettings, 1)
+    if row is None:
+        row = models.AttendanceWindowSettings(id=1)
+        db.add(row)
+    for name, value in payload.model_dump().items():
+        setattr(row, name, value)
+    security.write_audit_log(
+        db, action="attendance_window_update", result="success",
+        actor_user_id=user.id, client_ip=security.get_client_ip(request),
+        target_type="attendance_window_settings", target_id=1,
+        detail=f"before={old_values} after={payload.model_dump()}",
+    )
+    db.flush()
+    return payload
 
 
 class AdminUserRow(BaseModel):
@@ -1654,12 +1696,14 @@ def _enrolled_users(db: Session, course_id: int) -> list[AdminUserRow]:
 def admin_console_view(
     request: Request,
     user: models.User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
     """管理者の画面."""
     return templates.TemplateResponse(
         request=request,
         name="admin.html",
         context={
+            "attendance_window": _attendance_window_settings(db),
             "display_name": user.display_name,
             "csrf_token": csrf_token_for_request(request),
         },

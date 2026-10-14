@@ -424,3 +424,47 @@ def test_admin_is_routed_to_the_admin_console(tmp_path):
         db.close()
 
     assert response.headers["location"] == "/admin"
+
+
+def test_admin_can_save_attendance_windows_and_registration_uses_them(tmp_path):
+    db, ids = _fixture(tmp_path)
+    path = "/admin/attendance-window"
+    values = {"present_before_minutes": 10, "present_after_minutes": 1, "late_until_minutes": 30}
+    try:
+        admin = _client(db, "A0001")
+        assert admin.put(path, json=values).status_code == 403
+        assert admin.put(path, json=values, headers=_csrf(admin)).status_code == 200
+        db.commit()
+        with Session(db.bind) as fresh:
+            assert fresh.get(models.AttendanceWindowSettings, 1).present_after_minutes == 1
+        assert 'value="30"' in admin.get("/admin").text
+        teacher = _client(db, "T0001")
+        assert 'data-present-after-minutes="1"' in teacher.get("/teacher/courses").text
+        for login_id in ("T0001", "S0001"):
+            client = _client(db, login_id)
+            assert client.put(path, json=values, headers=_csrf(client)).status_code == 403
+        for invalid in ({"present_before_minutes": -1}, {"late_until_minutes": 0},
+                        {"present_after_minutes": 1.5}):
+            assert admin.put(path, json=values | invalid, headers=_csrf(admin)).status_code in (400, 422)
+        now = dt.datetime.now(dt.timezone.utc)
+        sess = models.AttendanceSession(
+            course_id=ids["course"], scheduled_start_at=security.to_iso(now - dt.timedelta(minutes=3)),
+            started_at=security.to_iso(now), status="open", required_scan_count=1,
+            token_salt=security.new_token_salt(), created_by=ids["t1"],
+        )
+        db.add(sess)
+        db.flush()
+        student = TestClient(app, base_url="https://testserver", client=("192.168.1.10", 5000))
+        student.post("/auth/login", json={"login_id": "S0001", "password": PASSWORD})
+        result = student.post("/attendances", headers=_csrf(student), json={
+            "attendance_session_id": sess.id, "token": security.generate_token(sess.id, sess.token_salt),
+        })
+        assert result.status_code == 200, result.text
+        record = db.query(models.Attendance).one()
+        assert record.status == "late"
+        assert admin.put(path, json=values | {"present_after_minutes": 5}, headers=_csrf(admin)).status_code == 200
+        assert teacher.get(f"/attendance-sessions/{sess.id}/attendances").json()["rows"][0]["status"] == "late"
+        assert db.query(models.AuditLog).filter_by(action="attendance_window_update").count() == 2
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
