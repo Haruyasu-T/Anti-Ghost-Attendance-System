@@ -47,6 +47,21 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 
+class AttendanceWindowSettings(Base):
+    """全授業共通の受付時間。未保存の場合は環境変数を使う。"""
+    __tablename__ = "attendance_window_settings"
+    id = Column(Integer, primary_key=True)
+    present_before_minutes = Column(Integer, nullable=False)
+    present_after_minutes = Column(Integer, nullable=False)
+    late_until_minutes = Column(Integer, nullable=False)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_attendance_window_singleton"),
+        CheckConstraint("present_before_minutes >= 0 AND present_after_minutes >= 0 "
+                        "AND late_until_minutes >= present_after_minutes",
+                        name="ck_attendance_window_minutes"),
+    )
+
+
 # UTC ISO 8601（"YYYY-MM-DDTHH:MM:SS.mmmZ"）の書式チェック用 SQL 断片．
 #
 # **桁数まで固定する**のが重要．時刻の範囲検索は文字列の大小比較で行うため
