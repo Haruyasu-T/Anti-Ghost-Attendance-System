@@ -265,6 +265,8 @@ class AttendanceStatus(str, Enum):
 def classify_attendance(
     scheduled_start_at: datetime,
     now: datetime,
+    *,
+    settings=None,
 ) -> AttendanceStatus | None:
     """出席区分を返す．受付時間外ならNone.
 
@@ -287,7 +289,7 @@ def classify_attendance(
             "classify_attendance にはタイムゾーン付きの datetime を渡してください。"
         )
 
-    settings = get_settings()
+    settings = settings if settings is not None else get_settings()
     elapsed_seconds = (now - scheduled_start_at).total_seconds()
 
     if elapsed_seconds < -settings.present_before_minutes * 60:
