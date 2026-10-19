@@ -9,6 +9,7 @@ import datetime as dt
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app import models, security
@@ -465,6 +466,43 @@ def test_admin_can_save_attendance_windows_and_registration_uses_them(tmp_path):
         assert admin.put(path, json=values | {"present_after_minutes": 5}, headers=_csrf(admin)).status_code == 200
         assert teacher.get(f"/attendance-sessions/{sess.id}/attendances").json()["rows"][0]["status"] == "late"
         assert db.query(models.AuditLog).filter_by(action="attendance_window_update").count() == 2
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+def test_attendance_window_cannot_be_narrowed_until_nobody_can_register(tmp_path):
+    """受付終了を0にすると全授業で誰も登録できなくなるので、入口で塞ぐ（D-19）.
+
+    判定は「開始からの経過秒 <= late_until * 60 なら遅刻」なので、0にすると
+    開始ちょうどの瞬間しか通らない。学生には「受付時間を過ぎています」と
+    出るだけで、教員の画面にも異常が出ない。打ち間違いで踏むと原因に
+    たどり着きにくいため、API・DB・画面の3か所で止めている。
+    """
+    db, _ = _fixture(tmp_path)
+    path = "/admin/attendance-window"
+    try:
+        admin = _client(db, "A0001")
+        base = {"present_before_minutes": 0, "present_after_minutes": 0}
+
+        for too_small in (0, 1, 4):
+            response = admin.put(
+                path, json=base | {"late_until_minutes": too_small},
+                headers=_csrf(admin),
+            )
+            assert response.status_code == 422, (too_small, response.text)
+
+        # 下限ちょうどは通る．0分前・0分後・5分後でも登録はできる形
+        assert admin.put(
+            path, json=base | {"late_until_minutes": 5}, headers=_csrf(admin),
+        ).status_code == 200
+
+        # DB側にも同じ下限があることを確かめる（APIを通さず直接入れてみる）
+        row = db.get(models.AttendanceWindowSettings, 1)
+        row.late_until_minutes = 0
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
     finally:
         app.dependency_overrides.clear()
         db.close()

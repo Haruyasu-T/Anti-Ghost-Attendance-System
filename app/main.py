@@ -107,6 +107,11 @@ templates.env.globals["static_url"] = static_url
 require_teacher = require_role("teacher")
 
 
+# 受付終了の下限．0にすると全授業で出席登録ができなくなるため（D-19）．
+# models.py の CHECK 制約と同じ値にしておくこと．
+_LATE_UNTIL_MIN_MINUTES = 5
+
+
 def _attendance_window_settings(db: Session):
     saved = db.get(models.AttendanceWindowSettings, 1)
     return saved if saved is not None else get_settings()
@@ -1568,9 +1573,18 @@ require_admin = require_role("admin")
 
 
 class AttendanceWindowRequest(BaseModel):
+    """受付時間の変更．
+
+    `late_until_minutes` にだけ下限を置いている．ここが0になると，
+    **全授業で誰も出席登録できなくなる**（開始ちょうどの瞬間しか通らない）．
+    学生には「受付時間を過ぎています」と出るだけで，教員の画面にも異常が
+    出ないので，設定を見に行くまで原因が分からない．
+    悪用というより打ち間違いで踏む地雷なので，入口で塞いでおく（D-19）．
+    """
+
     present_before_minutes: int = Field(ge=0, le=180, strict=True)
     present_after_minutes: int = Field(ge=0, le=180, strict=True)
-    late_until_minutes: int = Field(ge=0, le=180, strict=True)
+    late_until_minutes: int = Field(ge=_LATE_UNTIL_MIN_MINUTES, le=180, strict=True)
 
 
 @app.put("/admin/attendance-window")

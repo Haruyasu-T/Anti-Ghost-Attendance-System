@@ -56,7 +56,10 @@ class AttendanceWindowSettings(Base):
     late_until_minutes = Column(Integer, nullable=False)
     __table_args__ = (
         CheckConstraint("id = 1", name="ck_attendance_window_singleton"),
+        # 受付終了が0になると全授業で誰も登録できなくなるので下限を置く（D-19）．
+        # app/main.py の _LATE_UNTIL_MIN_MINUTES と同じ値にしておくこと．
         CheckConstraint("present_before_minutes >= 0 AND present_after_minutes >= 0 "
+                        "AND late_until_minutes >= 5 "
                         "AND late_until_minutes >= present_after_minutes",
                         name="ck_attendance_window_minutes"),
     )

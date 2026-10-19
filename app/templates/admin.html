@@ -15,7 +15,8 @@
         <p class="muted">変更は開催中の授業を含む、以後の初回出席登録に適用されます。登録済みの出席区分は変わりません。</p>
         <label>受付開始：授業開始の何分前 <input name="present_before_minutes" type="number" min="0" max="180" step="1" value="{{ attendance_window.present_before_minutes }}" required></label>
         <label>出席扱い：授業開始の何分後まで <input name="present_after_minutes" type="number" min="0" max="180" step="1" value="{{ attendance_window.present_after_minutes }}" required></label>
-        <label>遅刻受付終了：授業開始の何分後まで <input name="late_until_minutes" type="number" min="0" max="180" step="1" value="{{ attendance_window.late_until_minutes }}" required></label>
+        {# 受付終了を0にすると全授業で誰も登録できなくなるので、下限を5分にしている（D-19） #}
+        <label>遅刻受付終了：授業開始の何分後まで <input name="late_until_minutes" type="number" min="5" max="180" step="1" value="{{ attendance_window.late_until_minutes }}" required></label>
         <div id="attendance-window-error" class="alert alert-error" role="alert" hidden></div>
         <p id="attendance-window-saved" role="status" hidden>受付時間を保存しました。</p>
         <div class="button-row"><button class="btn btn-primary" type="submit">保存</button></div>
