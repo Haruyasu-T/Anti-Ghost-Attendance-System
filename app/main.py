@@ -46,6 +46,11 @@ from app.auth import (
 )
 from app.config import DISPLAY_TIMEZONE, get_settings
 from app.db import get_db, get_session_factory
+from app.routers.admin_users import (
+    AdminUserRow,
+    router as admin_users_router,
+    to_admin_user_row,
+)
 from scripts.init_db import create_tables
 
 # 授業開始時刻の入力許容幅．現在時刻からこれ以上離れた scheduled_start_at は
@@ -96,6 +101,7 @@ app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム", lifespan=lif
 # 「1箇所の書き忘れがそのまま穴になる」ことを避けるため．新しいエンドポイントを
 # 足しても自動的に守られる状態にしておく（security-interface.md 参照）．
 app.add_middleware(CsrfMiddleware)
+app.include_router(admin_users_router)
 
 app.mount("/static", VersionedStaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
@@ -1615,13 +1621,6 @@ def admin_update_attendance_window(
     return payload
 
 
-class AdminUserRow(BaseModel):
-    id: int
-    login_id: str
-    display_name: str
-    role: str
-
-
 class AdminCourseRow(BaseModel):
     id: int
     name: str
@@ -1665,15 +1664,6 @@ def _clean_course_name(raw: str) -> str:
     return name
 
 
-def _to_admin_user_row(user: models.User) -> AdminUserRow:
-    return AdminUserRow(
-        id=user.id,
-        login_id=user.login_id,
-        display_name=user.display_name,
-        role=user.role,
-    )
-
-
 def _to_admin_course_row(db: Session, course: models.Course) -> AdminCourseRow:
     teacher = db.get(models.User, course.teacher_id)
     return AdminCourseRow(
@@ -1703,7 +1693,7 @@ def _enrolled_users(db: Session, course_id: int) -> list[AdminUserRow]:
         .order_by(models.User.login_id)
         .all()
     )
-    return [_to_admin_user_row(u) for u in users]
+    return [to_admin_user_row(u) for u in users]
 
 
 @app.get("/admin")
@@ -1722,26 +1712,6 @@ def admin_console_view(
             "csrf_token": csrf_token_for_request(request),
         },
     )
-
-
-@app.get("/admin/users", response_model=list[AdminUserRow])
-def admin_list_users(
-    _: models.User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """割り当ての候補にする利用者の一覧.
-
-    `password_hash` は返さない．レスポンスの形を固定しているので，モデルに
-    列を足しても勝手に露出しない．他の管理者アカウントも一覧に出さない
-    （割り当ての候補にならないため）．
-    """
-    users = (
-        db.query(models.User)
-        .filter(models.User.role.in_(["teacher", "student"]))
-        .order_by(models.User.role, models.User.login_id)
-        .all()
-    )
-    return [_to_admin_user_row(u) for u in users]
 
 
 @app.get("/admin/courses", response_model=list[AdminCourseRow])
