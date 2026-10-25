@@ -1,11 +1,67 @@
-{% extends "base.html" %}
-{% block title %}QR表示 | 出席管理システム{% endblock %}
-{% block body_class %}projector-page{% endblock %}
-{% block content %}
-<section data-qr-screen data-session-id="{{ session_id }}" data-csrf-token="{{ csrf_token|default('', true) }}">
- <div class="page-heading"><p class="eyebrow">投影用QR</p><h1>{{ course_name|default('授業', true) }}</h1><p>授業開始時刻：{{ scheduled_start_display }}</p></div><div id="qr-error" class="alert alert-error" role="alert" hidden></div>
- <div class="projector-layout"><div class="qr-panel"><div id="qrcode" aria-label="出席登録QRコード"></div><div class="countdown"><span id="countdown-bar"></span></div><p id="countdown-label">更新情報を取得中…</p></div>
- <aside class="stack"><div class="metric"><span>登録済み</span><strong id="registered-count">—</strong></div><div class="metric"><span>受付中</span><strong id="scan-round">{{ required_scan_count }}回目</strong></div><button id="rescan-button" class="btn btn-primary" type="button">{{ required_scan_count + 1 }}回目のQRを表示</button><button id="rotate-button" class="btn btn-danger" type="button">QRを作り直す</button><a class="btn btn-secondary" href="/attendance-sessions/{{ session_id }}/attendances/view">出席状況を見る</a></aside></div>
+{% extends "base.html" %} {% block title %}QR表示 | 出席管理システム{% endblock %} {% block
+body_class %}projector-page{% endblock %} {% block content %}
+<section
+  data-qr-screen
+  data-session-id="{{ session_id }}"
+  data-csrf-token="{{ csrf_token|default('', true) }}"
+  data-scheduled-start-at="{{ scheduled_start_at }}"
+  data-present-before-minutes="{{ present_before_minutes }}"
+  data-present-after-minutes="{{ present_after_minutes }}"
+  data-late-until-minutes="{{ late_until_minutes }}"
+>
+  <div class="page-heading">
+    <p class="eyebrow">投影用QR</p>
+    <h1>{{ course_name|default('授業', true) }}</h1>
+    <p>授業開始時刻：{{ scheduled_start_display }}</p>
+  </div>
+  <div id="qr-error" class="alert alert-error" role="alert" hidden></div>
+  <div class="projector-layout">
+    <div class="qr-panel">
+      <div id="qrcode" aria-label="出席登録QRコード"></div>
+      <div class="countdown"><span id="countdown-bar"></span></div>
+      <p id="countdown-label">更新情報を取得中…</p>
+    </div>
+    <aside class="stack">
+      <div class="metric"><span>登録済み</span><strong id="registered-count">—</strong></div>
+      <div class="metric">
+        <span>受付中</span><strong id="scan-round">{{ required_scan_count }}回目</strong>
+      </div>
+      <button id="rescan-button" class="btn btn-primary" type="button">
+        {{ required_scan_count + 1 }}回目のQRを表示</button
+      ><button id="rotate-button" class="btn btn-danger" type="button">QRを作り直す</button
+      ><button id="change-start-button" class="btn btn-secondary" type="button">
+        開始時刻を変更</button
+      ><a class="btn btn-secondary" href="/attendance-sessions/{{ session_id }}/attendances/view"
+        >出席状況を見る</a
+      >
+    </aside>
+  </div>
+  <dialog id="start-time-dialog" aria-labelledby="start-time-title">
+    <form id="start-time-form" class="dialog-body">
+      <h2 id="start-time-title">授業開始時刻を変更</h2>
+      <div class="stack">
+        <label for="start-time-input">授業開始時刻</label>
+        <input id="start-time-input" type="datetime-local" required />
+        <p class="muted input-help">この時刻が出席・遅刻の判定基準になります。</p>
+        <div id="start-time-window" class="notice" aria-live="polite"></div>
+        <p class="alert alert-warning">
+          変更は以後の初回登録から適用されます。登録済みの出席区分は変わりません。変更前後の時刻は記録されます。
+        </p>
+        <div id="start-time-error" class="alert alert-error" role="alert" hidden></div>
+      </div>
+      <div class="dialog-actions">
+        <button id="start-time-cancel" class="btn btn-quiet" type="button">キャンセル</button>
+        <button id="start-time-submit" class="btn btn-primary" type="submit">変更する</button>
+      </div>
+    </form>
+  </dialog>
 </section>
+{% endblock %} {% block scripts %}
+<script
+  src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+  integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA=="
+  crossorigin="anonymous"
+  referrerpolicy="no-referrer"
+></script>
+<script src="{{ static_url('js/teacher-qr.js') }}" defer></script>
 {% endblock %}
-{% block scripts %}<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA==" crossorigin="anonymous" referrerpolicy="no-referrer"></script><script src="{{ static_url('js/teacher-qr.js') }}" defer></script>{% endblock %}
