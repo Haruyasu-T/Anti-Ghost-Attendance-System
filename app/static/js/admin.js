@@ -79,7 +79,7 @@ async function send(url, method, body, box) {
         detail = (await response.json()).detail || "";
     } catch (e) { /* JSONでない応答はメッセージなしで扱う */ }
 
-    if (response.status === 400 || response.status === 422) {
+    if (response.status === 400 || response.status === 409 || response.status === 422) {
         box.textContent = typeof detail === "string" && detail ? detail : "入力内容を確認してください。";
     } else if (response.status === 403) {
         box.textContent = "権限がありません。";
@@ -298,6 +298,36 @@ enrollmentForm?.addEventListener("submit", async (event) => {
 });
 
 if (page && tbody) loadAll();
+
+const userForm = document.querySelector("#user-form");
+userForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (userForm.dataset.saving === "true") return;
+    const box = document.querySelector("#user-error");
+    const saved = document.querySelector("#user-created");
+    saved.hidden = true;
+    box.hidden = true;
+    const loginId = document.querySelector("#user-login-id");
+    const displayName = document.querySelector("#user-display-name");
+    loginId.value = loginId.value.trim();
+    displayName.value = displayName.value.trim();
+    if (!userForm.reportValidity()) return;
+    if (document.querySelector("#user-password").value !== document.querySelector("#user-password-confirm").value) {
+        box.textContent = "確認用パスワードが一致しません。";
+        box.hidden = false;
+        return;
+    }
+    const body = Object.fromEntries(new FormData(userForm));
+    setSaving(userForm, true);
+    try {
+        await send("/admin/users", "POST", body, box);
+        userForm.reset();
+        saved.textContent = `${body.display_name}さん（${body.login_id}）のアカウントを作成しました。`;
+        saved.hidden = false;
+        await loadAll();
+    } catch (e) { /* メッセージは send が表示済み */ }
+    finally { setSaving(userForm, false); }
+});
 
 const windowForm = document.querySelector("#attendance-window-form");
 windowForm?.addEventListener("submit", async (event) => {

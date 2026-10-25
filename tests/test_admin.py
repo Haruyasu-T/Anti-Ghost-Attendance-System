@@ -60,6 +60,76 @@ def _csrf(client):
     return {"X-CSRF-Token": security.csrf_token_for_session(client.cookies.get("session"))}
 
 
+@pytest.mark.parametrize("role", ["student", "teacher"])
+def test_admin_creates_user_with_hashed_password_and_audit(tmp_path, role):
+    db, ids = _fixture(tmp_path)
+    try:
+        client = _client(db, "A0001")
+        payload = dict(login_id=" NEW001 ", display_name=" 新規利用者 ",
+                       role=role, password=PASSWORD)
+        response = client.post("/admin/users", json=payload, headers=_csrf(client))
+        assert response.status_code == 201
+        row = response.json()
+        assert row == dict(id=row["id"], login_id="NEW001", display_name="新規利用者", role=role)
+        created = db.get(models.User, row["id"])
+        assert created.password_hash != PASSWORD
+        assert security.verify_password(PASSWORD, created.password_hash)
+        assert row in client.get("/admin/users").json()
+        log = db.query(models.AuditLog).filter_by(action="user_create").one()
+        assert log.actor_user_id == ids["admin"]
+        assert log.target_id == created.id
+        assert PASSWORD not in (log.detail or "")
+        assert client.get("/admin").status_code == 200
+        assert _client(db, "NEW001").get("/auth/me").status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+@pytest.mark.parametrize("change,code", [
+    ({"login_id": " S0001 "}, 409),
+    ({"login_id": "A0001"}, 409),
+    ({"login_id": "   "}, 400),
+    ({"login_id": "NEW 001"}, 400),
+    ({"display_name": "   "}, 400),
+    ({"role": "admin"}, 400),
+    ({"role": "unknown"}, 400),
+    ({"password": "short"}, 422),
+    ({"password": " " * 8}, 400),
+    ({"password": "x" * 129}, 422),
+    ({"login_id": "x" * 101}, 422),
+    ({"display_name": "x" * 101}, 422),
+])
+def test_user_creation_rejects_invalid_input(tmp_path, change, code):
+    db, _ = _fixture(tmp_path)
+    try:
+        client = _client(db, "A0001")
+        payload = dict(login_id="NEW001", display_name="新規利用者", role="student", password=PASSWORD)
+        before = db.query(models.User).count()
+        response = client.post("/admin/users", json=payload | change, headers=_csrf(client))
+        assert response.status_code == code
+        assert db.query(models.User).count() == before
+        assert db.query(models.AuditLog).filter_by(action="user_create").count() == 0
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
+@pytest.mark.parametrize("login_id", [None, "S0001", "T0001", "A0001"])
+def test_user_creation_requires_admin_and_csrf(tmp_path, login_id):
+    db, _ = _fixture(tmp_path)
+    try:
+        client = _client(db, login_id) if login_id else TestClient(app, base_url="https://testserver")
+        payload = dict(login_id="NEW001", display_name="新規利用者", role="student", password=PASSWORD)
+        headers = _csrf(client) if login_id and login_id != "A0001" else {}
+        response = client.post("/admin/users", json=payload, headers=headers)
+        assert response.status_code in (401, 403)
+        assert db.query(models.User).filter_by(login_id="NEW001").count() == 0
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+
 # ============================================== 権限の境界（ここが一番大事）
 
 
