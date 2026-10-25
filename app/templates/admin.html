@@ -1,14 +1,34 @@
 {% extends "base.html" %}
-{% block title %}授業管理 | 出席管理システム{% endblock %}
+{% block title %}管理画面 | 出席管理システム{% endblock %}
 {% block content %}
 <section data-admin-console data-csrf-token="{{ csrf_token }}">
     <div class="page-heading">
         <p class="eyebrow">管理メニュー</p>
-        <h1>授業管理</h1>
+        <h1>管理画面</h1>
         {% if display_name %}<p class="muted">{{ display_name }}さんとしてログインしています。出席記録の閲覧・修正は担当教員のみが行えます。</p>{% endif %}
     </div>
 
     <div id="admin-error" class="alert alert-error" role="alert" hidden></div>
+
+    <form id="user-form" class="stack">
+        <h2>ユーザーを作成</h2>
+        <label for="user-login-id">ログインID（学籍番号・教員ID）</label>
+        <input id="user-login-id" name="login_id" type="text" maxlength="100" autocomplete="off" required>
+        <label for="user-display-name">氏名</label>
+        <input id="user-display-name" name="display_name" type="text" maxlength="100" required>
+        <label for="user-role">権限</label>
+        <select id="user-role" name="role" required>
+            <option value="student">学生</option>
+            <option value="teacher">教員</option>
+        </select>
+        <label for="user-password">初期パスワード（8〜128文字）</label>
+        <input id="user-password" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        <label for="user-password-confirm">初期パスワード（確認）</label>
+        <input id="user-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        <div id="user-error" class="alert alert-error" role="alert" hidden></div>
+        <p id="user-created" role="status" hidden></p>
+        <div class="button-row"><button class="btn btn-primary" type="submit">保存</button></div>
+    </form>
 
     <form id="attendance-window-form" class="stack">
         <h2>受付時間（全授業共通）</h2>
