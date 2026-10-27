@@ -256,6 +256,16 @@ class StartSessionRequest(BaseModel):
     scheduled_start_at: str
 
 
+class UpdateStartTimeRequest(BaseModel):
+    scheduled_start_at: str
+    # 開始時刻の変更は以後の判定を変える特権操作．手動修正と同じく理由を必須にする．
+    reason: str
+
+
+# 理由は監査ログの detail に入るので，長さに上限を置く（画面の maxlength と同じ値）．
+_START_TIME_REASON_MAX_LENGTH = 500
+
+
 class AttendanceSessionResponse(BaseModel):
     id: int
     course_id: int
@@ -722,6 +732,77 @@ def close_attendance_session(
     return _to_session_response(sess)
 
 
+@app.put(
+    "/attendance-sessions/{attendance_session_id}/scheduled-start",
+    response_model=AttendanceSessionResponse,
+)
+def update_scheduled_start(
+    payload: UpdateStartTimeRequest,
+    request: Request,
+    sess: models.AttendanceSession = Depends(require_session_owner),
+    user: models.User = Depends(require_teacher),
+    db: Session = Depends(get_db),
+):
+    """開催中のセッションの授業開始時刻を訂正する.
+
+    **登録済みの出席区分は再計算しない．** 受付時間帯の判定は `scan_seq = 1` の
+    ときだけ行うので（api-design.md 検証順序9），変更は以後の初回登録から効く．
+    遅刻にされた学生を救うなら手動修正を使う（理由と変更前後が残る）．
+    受付時間の変更（D-19）と同じ方針．
+
+    **以後の判定を変えられる特権操作**なので，`reason` を必須にし，変更前後の値と
+    理由を監査ログに残す（手動修正と同じ考え方．記録が残ることを操作者に
+    意識させること自体が抑止になる）．空文字やスペースだけの理由は400で拒否する．
+    入力の検証は開始時と同じ `_parse_scheduled_start_at`（タイムゾーン必須・
+    現在時刻の前後3時間以内）を通す．
+
+    理由は `manual_corrections` ではなく `audit_logs.detail` に残す．あの表は
+    出席区分の変更前後を持つ構造で，開始時刻の変更は載せられないため．
+    変更本体と同じトランザクションに書くので，ログの書き込みが失敗したら
+    変更もロールバックされる（記録の残らない変更を作らない）．
+
+    認可は `require_session_owner` に委ねる．`actor_user_id` には，他の教員向け
+    エンドポイントのように `sess.created_by` ではなくログイン中の教員本人を使う．
+    管理者が担当教員を変えた後は，作成者と操作者が別人になり得るため．
+    """
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="理由を入力してください"
+        )
+    if len(reason) > _START_TIME_REASON_MAX_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="理由が長すぎます"
+        )
+
+    if sess.status != "open":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="セッションは終了しています"
+        )
+
+    new_value = security.to_iso(
+        _parse_scheduled_start_at(payload.scheduled_start_at))
+    before_value = sess.scheduled_start_at
+    if new_value == before_value:
+        # 変わらない操作は記録しない．監査ログに意味のない行を増やさない．
+        return _to_session_response(sess)
+
+    sess.scheduled_start_at = new_value
+
+    security.write_audit_log(
+        db,
+        action="session_start_time_update",
+        result="success",
+        actor_user_id=user.id,
+        client_ip=security.get_client_ip(request),
+        target_type="attendance_session",
+        target_id=sess.id,
+        detail=f"before={before_value} after={new_value} reason={reason}",
+    )
+
+    return _to_session_response(sess)
+
+
 @app.get("/attendance-sessions/{attendance_session_id}/qr")
 def teacher_qr_view(
     request: Request,
@@ -737,6 +818,9 @@ def teacher_qr_view(
     ため．api-design.mdのHTTPステータスの使い分け参照）．
     """
     course = db.get(models.Course, sess.course_id)
+    # 開始時刻の変更ダイアログに受付時間帯を出すために渡す．JS側に数字を
+    # 直書きさせない理由は teacher_courses_view と同じ（表示と判定のずれを防ぐ）．
+    window_settings = _attendance_window_settings(db)
     return templates.TemplateResponse(
         request=request,
         name="teacher_qr.html",
@@ -746,7 +830,11 @@ def teacher_qr_view(
             "course_name": course.name if course is not None else None,
             "required_scan_count": sess.required_scan_count,
             "scheduled_start_display": security.from_iso(sess.scheduled_start_at)
-                .astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z"),
+            .astimezone(DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z"),
+            "scheduled_start_at": sess.scheduled_start_at,
+            "present_before_minutes": window_settings.present_before_minutes,
+            "present_after_minutes": window_settings.present_after_minutes,
+            "late_until_minutes": window_settings.late_until_minutes,
         },
     )
 
@@ -948,7 +1036,8 @@ def list_attendance_session_alerts(
             device_order.append(scan.device_id)
         users_by_device[scan.device_id].add(scan.user_id)
 
-    labels = {device_id: _device_label(i + 1) for i, device_id in enumerate(device_order)}
+    labels = {device_id: _device_label(i + 1)
+              for i, device_id in enumerate(device_order)}
     burst_devices = _burst_device_ids(
         scans, settings.burst_threshold_count, settings.burst_window_seconds
     )
@@ -1501,7 +1590,8 @@ def list_courses(
     open_sessions = (
         db.query(models.AttendanceSession)
         .filter(
-            models.AttendanceSession.course_id.in_([course.id for course in courses]),
+            models.AttendanceSession.course_id.in_(
+                [course.id for course in courses]),
             models.AttendanceSession.status == "open",
         )
         .order_by(models.AttendanceSession.id.desc())
@@ -1590,7 +1680,8 @@ class AttendanceWindowRequest(BaseModel):
 
     present_before_minutes: int = Field(ge=0, le=180, strict=True)
     present_after_minutes: int = Field(ge=0, le=180, strict=True)
-    late_until_minutes: int = Field(ge=_LATE_UNTIL_MIN_MINUTES, le=180, strict=True)
+    late_until_minutes: int = Field(
+        ge=_LATE_UNTIL_MIN_MINUTES, le=180, strict=True)
 
 
 @app.put("/admin/attendance-window")
@@ -1720,7 +1811,8 @@ def admin_list_courses(
     db: Session = Depends(get_db),
 ):
     courses = (
-        db.query(models.Course).order_by(models.Course.name, models.Course.id).all()
+        db.query(models.Course).order_by(
+            models.Course.name, models.Course.id).all()
     )
     return [_to_admin_course_row(db, c) for c in courses]
 

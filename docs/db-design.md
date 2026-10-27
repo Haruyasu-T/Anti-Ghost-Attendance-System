@@ -220,6 +220,7 @@ CREATE INDEX idx_audit_logs_login_time  ON audit_logs (attempted_login_id, occur
 | `session_close` | 出席セッション終了 |
 | `rescan_start` | 2回目以降のQR再表示 |
 | `token_rotate` | 塩の作り直し（QRの失効） |
+| `session_start_time_update` | 授業開始時刻の訂正．`detail` に変更前後の時刻と理由 |
 | `attendance_register` | 出席登録．失敗も理由つきで |
 | `manual_correction` | 手動修正 |
 | `device_conflict` | 別アカウントに紐付いた端末からの登録を検知 |
