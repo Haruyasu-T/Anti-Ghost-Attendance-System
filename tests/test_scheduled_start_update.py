@@ -5,7 +5,8 @@
 - 認可：担当外の教員は404，学生は403（どちらも値を変えず，ログも残さない）
 - 状態：終了済みセッションは409
 - CSRF：トークンが無い／違うと403
-- 監査：変更前後の時刻と実施者が `audit_logs` に残る
+- 理由：必須（空・空白だけ・欠落・長すぎるものは拒否）．手動修正と同じ扱い
+- 監査：変更前後の時刻・理由・実施者が `audit_logs` に残る
 - 効果：開始時刻を動かすと，それまで受付時間外で弾かれていた読み取りが通る
 - 方針：登録済みの出席区分は再計算しない（以後の初回登録から効く）
 
@@ -25,6 +26,7 @@ from app.main import app
 
 CAMPUS_IP = "192.168.1.10"  # conftest の CAMPUS_IP_RANGES（192.168.0.0/16）に含まれる
 ACTION = "session_start_time_update"
+REASON = "開始時刻の入力ミスを訂正"
 
 
 # ------------------------------------------------------------ 道具立て
@@ -59,7 +61,8 @@ def world(monkeypatch):
         course = models.Course(name="情報セキュリティ", teacher_id=users["owner"].id)
         db.add(course)
         db.flush()
-        db.add(models.Enrollment(course_id=course.id, user_id=users["student"].id))
+        db.add(models.Enrollment(
+            course_id=course.id, user_id=users["student"].id))
 
         original_start = security.to_iso(now - timedelta(minutes=60))
         sess = models.AttendanceSession(
@@ -108,11 +111,19 @@ def _new_start(minutes_from_now: int = 0) -> datetime:
     return now + timedelta(minutes=minutes_from_now)
 
 
-def _put_start(client, world, new_start: datetime, headers: dict):
+def _put_json(client, world, body: dict, headers: dict):
     return client.put(
         f"/attendance-sessions/{world.session_id}/scheduled-start",
-        json={"scheduled_start_at": new_start.isoformat()},
+        json=body,
         headers=headers,
+    )
+
+
+def _put_start(client, world, new_start: datetime, headers: dict, reason: str = REASON):
+    return _put_json(
+        client, world,
+        {"scheduled_start_at": new_start.isoformat(), "reason": reason},
+        headers,
     )
 
 
@@ -201,7 +212,7 @@ def test_missing_or_wrong_csrf_token_gets_403(world, header_value):
 # ------------------------------------------------------------ 監査ログ
 
 
-def test_audit_log_records_before_after_and_actor(world):
+def test_audit_log_records_before_after_reason_and_actor(world):
     raw = world.raw["owner"]
     new_start = _new_start(minutes_from_now=-10)
 
@@ -219,7 +230,9 @@ def test_audit_log_records_before_after_and_actor(world):
     assert row.actor_user_id == world.owner_id
     assert row.target_type == "attendance_session"
     assert row.target_id == world.session_id
-    assert row.detail == f"before={world.original_start} after={expected_after}"
+    assert row.detail == (
+        f"before={world.original_start} after={expected_after} reason={REASON}"
+    )
 
 
 def test_unchanged_value_writes_no_audit_log(world):
@@ -232,6 +245,64 @@ def test_unchanged_value_writes_no_audit_log(world):
     assert response.status_code == 200
     assert _stored_start(world) == world.original_start
     assert _audit_rows() == []
+
+
+# ------------------------------------------------------------ 理由（必須）
+
+
+@pytest.mark.parametrize("reason", ["", "   ", "\n\t \u3000"])
+def test_blank_reason_gets_400(world, reason):
+    """空文字・スペースだけ（全角空白・改行含む）の理由は拒否する.
+
+    画面の required はスペースだけの入力を通すので，サーバー側が本体．
+    """
+    raw = world.raw["owner"]
+
+    response = _put_start(_client(raw), world,
+                          _new_start(), _csrf(raw), reason=reason)
+
+    assert response.status_code == 400
+    _assert_untouched(world)
+
+
+def test_missing_reason_is_rejected(world):
+    """reason を送らない（フィールドごと無い）リクエストも通らない."""
+    raw = world.raw["owner"]
+
+    response = _put_json(
+        _client(raw), world,
+        {"scheduled_start_at": _new_start().isoformat()},
+        _csrf(raw),
+    )
+
+    assert response.status_code == 422
+    _assert_untouched(world)
+
+
+def test_reason_length_limit(world):
+    """理由は500文字まで．監査ログの detail に入る値なので上限を置いている."""
+    raw = world.raw["owner"]
+
+    too_long = _put_start(_client(raw), world, _new_start(),
+                          _csrf(raw), reason="あ" * 501)
+    assert too_long.status_code == 400
+    _assert_untouched(world)
+
+    just_fits = _put_start(_client(raw), world,
+                           _new_start(), _csrf(raw), reason="あ" * 500)
+    assert just_fits.status_code == 200
+    assert _audit_rows()[0].detail.endswith("reason=" + "あ" * 500)
+
+
+def test_reason_is_stripped_before_logging(world):
+    raw = world.raw["owner"]
+
+    response = _put_start(
+        _client(raw), world, _new_start(), _csrf(raw), reason="  \n" + REASON + " \u3000 "
+    )
+
+    assert response.status_code == 200
+    assert _audit_rows()[0].detail.endswith(f"reason={REASON}")
 
 
 # ------------------------------------------------------------ 効果
@@ -263,14 +334,16 @@ def test_already_registered_status_is_not_recalculated(world):
     raw_owner = world.raw["owner"]
 
     # 開始を「今から10分前」にして登録する → 開始5分後を過ぎているので遅刻．
-    response = _put_start(_client(raw_owner), world, _new_start(-10), _csrf(raw_owner))
+    response = _put_start(_client(raw_owner), world,
+                          _new_start(-10), _csrf(raw_owner))
     assert response.status_code == 200
     registered = _register(world)
     assert registered.status_code == 200
     assert registered.json()["status"] == "late"
 
     # 開始を「今」に動かす．やり直せば出席になる時刻だが，保存済みの区分は変えない．
-    response = _put_start(_client(raw_owner), world, _new_start(), _csrf(raw_owner))
+    response = _put_start(_client(raw_owner), world,
+                          _new_start(), _csrf(raw_owner))
     assert response.status_code == 200
 
     with db_module.get_session_factory()() as db:
