@@ -110,10 +110,11 @@ setInterval(refreshCount, 5000);
   const form = document.querySelector("#start-time-form");
   const input = document.querySelector("#start-time-input");
   const windowBox = document.querySelector("#start-time-window");
+  const reasonInput = document.querySelector("#start-time-reason");
   const dialogError = document.querySelector("#start-time-error");
   const submitButton = document.querySelector("#start-time-submit");
   const openButton = document.querySelector("#change-start-button");
-  if (!dialog || !form || !input || !openButton) return;
+  if (!dialog || !form || !input || !reasonInput || !openButton) return;
 
   // 受付時間帯の分数はサーバーから受け取る（JSに直書きしない）．
   const minutes = {
@@ -157,8 +158,9 @@ setInterval(refreshCount, 5000);
   }
 
   function messageFor(status) {
-    if (status === 400)
-      return "開始時刻を確認してください。現在時刻から3時間以内の日時を入力してください。";
+    if (status === 400 || status === 422) {
+      return "入力内容を確認してください。開始時刻は現在時刻から3時間以内、理由は必須（500文字以内）です。";
+    }
     if (status === 409) return "このセッションは終了しています。";
     if (status === 401) return "ログインし直してください。";
     if (status === 403 || status === 404)
@@ -169,6 +171,7 @@ setInterval(refreshCount, 5000);
   openButton.addEventListener("click", function () {
     const current = new Date(root.dataset.scheduledStartAt);
     input.value = Number.isNaN(current.getTime()) ? "" : toLocalInputValue(current);
+    reasonInput.value = "";
     dialogError.hidden = true;
     updateWindow();
     dialog.showModal();
@@ -188,6 +191,14 @@ setInterval(refreshCount, 5000);
       dialogError.hidden = false;
       return;
     }
+    // required はスペースだけの入力を通すので，ここでも確認する（サーバーも拒否する）．
+    const reason = reasonInput.value.trim();
+    if (!reason) {
+      dialogError.textContent = "変更理由を入力してください。";
+      dialogError.hidden = false;
+      reasonInput.focus();
+      return;
+    }
     dialogError.hidden = true;
     submitButton.disabled = true;
     try {
@@ -195,7 +206,7 @@ setInterval(refreshCount, 5000);
         method: "PUT",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
-        body: JSON.stringify({ scheduled_start_at: scheduledStart.toISOString() }),
+        body: JSON.stringify({ scheduled_start_at: scheduledStart.toISOString(), reason: reason }),
       });
       if (response.ok) {
         // 画面の開始時刻表示はサーバーがJSTに整形した文字列なので，

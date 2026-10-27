@@ -250,6 +250,16 @@ class StartSessionRequest(BaseModel):
     scheduled_start_at: str
 
 
+class UpdateStartTimeRequest(BaseModel):
+    scheduled_start_at: str
+    # 開始時刻の変更は以後の判定を変える特権操作．手動修正と同じく理由を必須にする．
+    reason: str
+
+
+# 理由は監査ログの detail に入るので，長さに上限を置く（画面の maxlength と同じ値）．
+_START_TIME_REASON_MAX_LENGTH = 500
+
+
 class AttendanceSessionResponse(BaseModel):
     id: int
     course_id: int
@@ -721,7 +731,7 @@ def close_attendance_session(
     response_model=AttendanceSessionResponse,
 )
 def update_scheduled_start(
-    payload: StartSessionRequest,
+    payload: UpdateStartTimeRequest,
     request: Request,
     sess: models.AttendanceSession = Depends(require_session_owner),
     user: models.User = Depends(require_teacher),
@@ -734,14 +744,31 @@ def update_scheduled_start(
     遅刻にされた学生を救うなら手動修正を使う（理由と変更前後が残る）．
     受付時間の変更（D-19）と同じ方針．
 
-    **以後の判定を変えられる特権操作**なので，変更前後の値を監査ログに残す．
+    **以後の判定を変えられる特権操作**なので，`reason` を必須にし，変更前後の値と
+    理由を監査ログに残す（手動修正と同じ考え方．記録が残ることを操作者に
+    意識させること自体が抑止になる）．空文字やスペースだけの理由は400で拒否する．
     入力の検証は開始時と同じ `_parse_scheduled_start_at`（タイムゾーン必須・
     現在時刻の前後3時間以内）を通す．
+
+    理由は `manual_corrections` ではなく `audit_logs.detail` に残す．あの表は
+    出席区分の変更前後を持つ構造で，開始時刻の変更は載せられないため．
+    変更本体と同じトランザクションに書くので，ログの書き込みが失敗したら
+    変更もロールバックされる（記録の残らない変更を作らない）．
 
     認可は `require_session_owner` に委ねる．`actor_user_id` には，他の教員向け
     エンドポイントのように `sess.created_by` ではなくログイン中の教員本人を使う．
     管理者が担当教員を変えた後は，作成者と操作者が別人になり得るため．
     """
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="理由を入力してください"
+        )
+    if len(reason) > _START_TIME_REASON_MAX_LENGTH:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="理由が長すぎます"
+        )
+
     if sess.status != "open":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="セッションは終了しています"
@@ -764,7 +791,7 @@ def update_scheduled_start(
         client_ip=security.get_client_ip(request),
         target_type="attendance_session",
         target_id=sess.id,
-        detail=f"before={before_value} after={new_value}",
+        detail=f"before={before_value} after={new_value} reason={reason}",
     )
 
     return _to_session_response(sess)

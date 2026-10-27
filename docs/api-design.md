@@ -216,20 +216,21 @@ QR表示画面が `rotate_seconds` ごとにポーリングして再描画する
 ### PUT /attendance-sessions/{id}/scheduled-start
 
 ```
-{ "scheduled_start_at": "2026-07-27T01:05:00Z" }
+{ "scheduled_start_at": "2026-07-27T01:05:00Z", "reason": "開始時刻の入力ミスを訂正" }
 ```
 
 開催中のセッションの授業開始時刻を訂正する．開始時に入力を間違えた場合の手段．教員・担当授業のみ．
 
+- `reason` は必須．前後の空白を除いて空なら400，500文字を超えても400（手動修正と同じ扱い）
 - 入力の検証は開始時（`POST .../attendance-sessions`）と同じ．タイムゾーン必須，現在時刻の前後3時間以内．違えば400
 - `open` でないセッションは409
 - 現在と同じ値なら何も変えず，監査ログも残さない
 
 **登録済みの出席区分は再計算しない．** 受付時間帯の判定は `scan_seq = 1` のときだけ行う（検証順序9）ので，変更は以後の初回登録から効く．「遅刻にされた学生を救いたい」場合は手動修正を使う．理由と変更前後が `manual_corrections` に残る．受付時間の変更（D-19）と同じ方針．
 
-**以後の判定を変えられる特権操作**なので，`audit_logs` に `session_start_time_update` として記録する．`detail` は `before=<旧UTC時刻> after=<新UTC時刻>`．`actor_user_id` はログイン中の教員本人（他の教員向けAPIが使う `created_by` ではない．管理者が担当教員を変えた後は作成者と操作者が別人になり得る）．
+**以後の判定を変えられる特権操作**なので，`audit_logs` に `session_start_time_update` として記録する．`detail` は `before=<旧UTC時刻> after=<新UTC時刻> reason=<理由>`（`reason` は末尾に置く．自由文なので先頭に置くと区切れない）．変更本体と同じトランザクションに書くので，ログの書き込みが失敗したら変更もロールバックされる．
 
-限界：開始時刻を後ろへ動かせば，教員は後から来た学生を「出席」の時間帯に入れられる．手動修正と違って理由の入力を求めていないので，抑止は監査ログの追跡可能性だけになる．
+理由を `manual_corrections` ではなく `audit_logs.detail` に残すのは，あの表が出席区分の変更前後（`before_status` / `after_status`）を持つ構造で，開始時刻の変更は載せられないため．専用の表を作る手もあるが，`audit_logs` は `action` で検索できるので今回は足さない．`actor_user_id` はログイン中の教員本人（他の教員向けAPIが使う `created_by` ではない．管理者が担当教員を変えた後は作成者と操作者が別人になり得る）．
 
 ### GET /attendance-sessions/{id}/attendances
 

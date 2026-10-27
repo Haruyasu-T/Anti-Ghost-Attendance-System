@@ -44,8 +44,10 @@ body_class %}projector-page{% endblock %} {% block content %}
         <input id="start-time-input" type="datetime-local" required />
         <p class="muted input-help">この時刻が出席・遅刻の判定基準になります。</p>
         <div id="start-time-window" class="notice" aria-live="polite"></div>
+        <label for="start-time-reason">変更理由（必須）</label>
+        <textarea id="start-time-reason" required maxlength="500"></textarea>
         <p class="alert alert-warning">
-          変更は以後の初回登録から適用されます。登録済みの出席区分は変わりません。変更前後の時刻は記録されます。
+          変更は以後の初回登録から適用されます。登録済みの出席区分は変わりません。変更前後の時刻と理由が記録されます。
         </p>
         <div id="start-time-error" class="alert alert-error" role="alert" hidden></div>
       </div>
