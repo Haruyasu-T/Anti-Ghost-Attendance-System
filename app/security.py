@@ -627,6 +627,27 @@ def check_device_binding(db, device_id: str | None, user_id: int) -> DeviceCheck
 RATE_LIMITED_ACTION = "rate_limited"
 
 
+def _logged_rate_limit_recently(db, column, value, within_minutes: int) -> bool:
+    """直近 `within_minutes` 分に，同じ相手の制限記録が既にあるかを返す."""
+    from app import models
+
+    if not value:
+        return False
+
+    since = to_iso(_utcnow() - timedelta(minutes=within_minutes))
+
+    return (
+        db.query(models.AuditLog.id)
+        .filter(
+            models.AuditLog.action == RATE_LIMITED_ACTION,
+            column == value,
+            models.AuditLog.occurred_at >= since,
+        )
+        .first()
+        is not None
+    )
+
+
 def _is_locked_out(
     db,
     action: str,
@@ -703,6 +724,50 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
         or _is_locked_out(
             db, "login", models.AuditLog.client_ip, client_ip, **thresholds
         )
+    )
+
+
+def should_log_login_rate_limit(db, login_id: str | None, client_ip: str | None) -> bool:
+    """ログインの制限を記録すべきか（ロック期間に1回だけ）を返す.
+
+    `is_login_rate_limited` と対で使う．**`db.rollback()` より先に呼ぶこと**
+    （`should_log_attendance_rate_limit` の説明を参照）．
+    """
+    from app import models
+
+    within = get_settings().login_lockout_minutes
+
+    return not (
+        _logged_rate_limit_recently(
+            db, models.AuditLog.attempted_login_id, login_id, within
+        )
+        or _logged_rate_limit_recently(
+            db, models.AuditLog.client_ip, client_ip, within
+        )
+    )
+
+
+def should_log_attendance_rate_limit(db, user_id: int | None) -> bool:
+    """出席登録の制限を記録すべきか（ロック期間に1回だけ）を返す.
+
+    弾いた試行を**毎回**記録すると，1リクエストあたり1行で `audit_logs` が
+    増え続ける．制限をかけた目的の半分（記録を残す仕組みを記録で溢れさせ
+    られないこと）が達成できないので，ロック期間に1回だけ書く．
+
+    代わりに「何回叩かれたか」は分からなくなる．攻撃の有無は1行あれば
+    判断できるので，行数に上限が付く方を取った（D-22）．
+
+    ⚠️ **`db.rollback()` より先に呼ぶこと．** ロールバックの後にこの関数で
+    `db` を読むと読み取りロックを取り直してしまい，直後の
+    `write_audit_log_now` がコミットできずに D-21 のロック待ちに戻る．
+    """
+    from app import models
+
+    return not _logged_rate_limit_recently(
+        db,
+        models.AuditLog.actor_user_id,
+        user_id,
+        get_settings().attendance_lockout_minutes,
     )
 
 
