@@ -17,6 +17,15 @@ button,.btn,.action-card { min-height:44px; }
 .brand { display:inline-flex; align-items:center; gap:.5rem; font-weight:800; text-decoration:none; }
 .brand img { display:block; height:28px; width:auto; }
 .container { width:min(100% - 2rem,1120px); margin:0 auto; padding:2rem 0 4rem; }
+.site-footer { padding:1.25rem max(1rem,calc((100vw - 1120px)/2)); border-top:1px solid var(--line); background:var(--surface); }
+.site-footer p { margin:0; font-size:.85rem; }
+.site-footer a { color:var(--muted); }
+.license-notice { padding:1rem; overflow-x:auto; font-size:.8rem; line-height:1.5; white-space:pre-wrap; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); }
+.credits { margin:0; padding-left:1.25rem; line-height:1.9; }
+/* QR投影画面は教室の後方から見せるので、余計な要素を出さない */
+.projector-page .site-footer { display:none; }
+/* ログイン画面は中央寄せのグリッドなので、帯ではなく文字だけにする */
+.auth-page .site-footer { padding:.5rem; background:none; border:0; }
 .auth-page { display:grid; place-items:center; padding:1rem; background:radial-gradient(circle at top,#dbe8ff,var(--bg) 55%); }
 .auth-page .container { width:min(100%,440px); padding:0; }
 .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:clamp(1.25rem,4vw,2rem); }

@@ -32,6 +32,13 @@
     <main id="main-content" class="container">
         {% block content %}{% endblock %}
     </main>
+    {# ライセンス表示への入口．認証の後ろに隠さないよう全ページに置く。
+       QR投影画面（projector-page）ではCSSで隠す。 #}
+    {% block footer %}
+    <footer class="site-footer">
+        <p><a href="/about">このシステムについて・ライセンス</a></p>
+    </footer>
+    {% endblock %}
     <div id="live-region" class="sr-only" aria-live="polite"></div>
     <script src="{{ static_url('js/common.js') }}" defer></script>
     {% block scripts %}{% endblock %}

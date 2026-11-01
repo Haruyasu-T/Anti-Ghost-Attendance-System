@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app import models, security
+from app import __version__, models, security
 from app.assets import VersionedStaticFiles, static_url
 from app.auth import (
     DEVICE_COOKIE,
@@ -46,6 +46,7 @@ from app.auth import (
 )
 from app.config import DISPLAY_TIMEZONE, get_settings
 from app.db import get_db, get_session_factory
+from app.security_headers import SecurityHeadersMiddleware
 from app.routers.admin_users import (
     AdminUserRow,
     router as admin_users_router,
@@ -101,6 +102,10 @@ app = FastAPI(title="学内Wi-Fi連動 QR出席管理システム", lifespan=lif
 # 「1箇所の書き忘れがそのまま穴になる」ことを避けるため．新しいエンドポイントを
 # 足しても自動的に守られる状態にしておく（security-interface.md 参照）．
 app.add_middleware(CsrfMiddleware)
+# セキュリティヘッダーも同じ理由でミドルウェアにする．静的ファイルの応答にも付く．
+# CSPがインラインスクリプトを禁じるので，新しいJSは必ず app/static/js/ に置くこと
+# （app/security_headers.py の冒頭を参照）．
+app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(admin_users_router)
 
 app.mount("/static", VersionedStaticFiles(directory="app/static"), name="static")
@@ -139,6 +144,19 @@ def health():
 def login_page(request: Request):
     """ログイン画面．ログイン前の画面なので誰でも見られる．"""
     return templates.TemplateResponse(request=request, name="login.html", context={})
+
+
+@app.get("/about")
+def about_page(request: Request):
+    """ライセンスと使用ソフトウェアの表示．
+
+    **ログイン不要**にしている．ライセンス表示は利用者が見られる場所に置く
+    必要があり，認証の後ろに隠すと表示したことにならない．
+    DBも触らないので `get_db` を取らない．
+    """
+    return templates.TemplateResponse(
+        request=request, name="about.html", context={"version": __version__}
+    )
 
 
 @app.get("/")
