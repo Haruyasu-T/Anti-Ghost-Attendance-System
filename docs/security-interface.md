@@ -17,9 +17,12 @@
 | `PRESENT_AFTER_MINUTES` | 5 | 開始何分後まで出席とするか |
 | `LATE_UNTIL_MINUTES` | 20 | 開始何分後まで遅刻として受け付けるか |
 | `CAMPUS_IP_RANGES` | なし（必須） | 学内とみなすIPレンジ（CIDR） |
-| `LOGIN_MAX_FAILURES` | 5 | レート制限の閾値（失敗回数） |
+| `LOGIN_MAX_FAILURES` | 5 | ログインのレート制限の閾値（失敗回数） |
 | `LOGIN_WINDOW_MINUTES` | 10 | 失敗回数を数える期間 |
 | `LOGIN_LOCKOUT_MINUTES` | 15 | 制限がかかる時間 |
+| `ATTENDANCE_MAX_FAILURES` | 10 | 出席登録のレート制限の閾値（失敗回数） |
+| `ATTENDANCE_WINDOW_MINUTES` | 5 | 失敗回数を数える期間 |
+| `ATTENDANCE_LOCKOUT_MINUTES` | 2 | 制限がかかる時間 |
 | `BURST_THRESHOLD_COUNT` | 3 | バースト検知の閾値 |
 | `BURST_WINDOW_SECONDS` | 60 | バースト検知の集計期間 |
 | `TRUSTED_PROXY_COUNT` | 0 | 前段にいる信頼できるプロキシの数（後述） |
@@ -231,13 +234,34 @@ def check_device_binding(db, device_id: str | None,
 ```python
 def is_login_rate_limited(db, login_id: str | None,
                           client_ip: str | None) -> bool: ...
+
+def is_attendance_rate_limited(db, user_id: int | None) -> bool: ...
 ```
 
-`audit_logs` の `action='login'` かつ `result='failure'` を，`login_id` 別と `client_ip` 別の両方で数える．
+どちらも `audit_logs` の `result='failure'` を数える．専用のカウンタ表やメモリ上の辞書は持たない（再起動で消えない／既にある記録をそのまま使える／あとから追える）．
 
-両方見るのは，`login_id` だけだと1つのIPから多数のIDを総当たりされ，`client_ip` だけだと分散したIPから1つのIDを狙われるため．
+判定のしかた：直近の失敗を `*_WINDOW_MINUTES` 分の幅で数え，`*_MAX_FAILURES` 件以上あれば，**最後の失敗から `*_LOCKOUT_MINUTES` の間**は拒否する．失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
 
-判定のしかた：直近の失敗を `LOGIN_WINDOW_MINUTES` 分の幅で数え，`LOGIN_MAX_FAILURES` 件以上あれば，**最後の失敗から `LOGIN_LOCKOUT_MINUTES` の間**は拒否する．失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
+#### ログイン（`action='login'`）
+
+`login_id` 別と `client_ip` 別の両方で数える．`login_id` だけだと1つのIPから多数のIDを総当たりされ，`client_ip` だけだと分散したIPから1つのIDを狙われるため．
+
+#### 出席登録（`action='attendance_register'`）
+
+**本人（`actor_user_id`）だけで数える．IPも端末も見ない．**
+
+- `client_ip` … 学内Wi-Fiでは全員が大学のNATの出口IPで届く．IPで数えると誰か1人の失敗で教室全員が登録できなくなる（`detect_burst` と同じ事情）
+- `device_id` … 1台から複数アカウントを回す使い方は `detect_burst` が別に見ている．ここで重ねると，端末を貸し借りした2人目が1人目の失敗で弾かれる
+
+閾値はログインよりかなり緩い．**誤って弾くと，授業に出ている学生が欠席として残る**ので，取りこぼしより誤検知の方が高くつく．そもそもトークンは64ビットで有効期間が10秒前後なので，総当たりはこの制限が無くても成立しない．ここで止めたいのは，自動化した連打で監査ログとDBを膨らませる使い方に上限を与えること（D-22）．
+
+#### ⚠️ 弾いた試行は別の `action` で記録すること
+
+429 を返したこと自体も記録する．「総当たりを受けていたが止めた」が後から追えないと，攻撃の記録として使えない．
+
+ただし記録するときの `action` は **`security.RATE_LIMITED_ACTION`（`'rate_limited'`）** を使う．`'login'` や `'attendance_register'` の失敗として書くと，**弾いた試行がそれ自体で次のロックを延ばし，待っても永久に解除されない**．出席登録では学生が授業中ずっと登録できなくなる．
+
+`_reject_now`（`main.py`）を通すとこの `action` で書けないので，429 の経路だけは通さずに書いている．
 
 ### 異常検知
 

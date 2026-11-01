@@ -32,3 +32,36 @@ jobs:
 
       - name: Verify QR actions
         run: node tests/test_teacher_qr_js.cjs
+
+  # 依存ライブラリに既知の脆弱性が無いかを調べる。
+  #
+  # テストとは別のジョブにしている。落ちる理由が「自分たちのコードが壊れた」
+  # ではなく「使っているライブラリに新しい脆弱性が見つかった」なので、
+  # どちらが起きたのかを一目で分けられるようにしておきたい。
+  #
+  # requirements.txt は下限（>=）しか書いていないので、入るのは常に最新版。
+  # 「入れ直せば直る」脆弱性は Dependabot（.github/dependabot.yml）が
+  # 上げてくる更新で解消する。
+  #
+  # 直せない脆弱性（上流に修正版が無い）で止まったときは、落としたままに
+  # せず pip-audit --ignore-vuln GHSA-xxxx で明示的に除外し、
+  # なぜ許容するのかをここにコメントで残すこと。黙って無効化しないため。
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pip-audit
+
+      # 実際にインストールされた一式を調べる（推移的な依存も含む）。
+      # requirements.txt を読ませるだけだと、そこに書いていない依存が漏れる。
+      - name: Audit installed packages
+        run: pip-audit

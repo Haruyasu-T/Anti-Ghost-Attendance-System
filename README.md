@@ -97,7 +97,7 @@ uvicorn app.main:app --reload
 pytest
 ```
 
-pushとPull Requestで GitHub Actions が自動実行します．
+pushとPull Requestで GitHub Actions が自動実行します．テストとは別に，依存ライブラリの既知の脆弱性を `pip-audit` で調べるジョブも走ります（更新のPRは Dependabot が毎週上げてきます）．
 
 ## 開発ルール
 

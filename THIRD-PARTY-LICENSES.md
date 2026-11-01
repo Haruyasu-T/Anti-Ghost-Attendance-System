@@ -60,7 +60,7 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
 | pytest | 9.1.1 | MIT |
-| httpx | 0.28.1 | BSD-3-Clause |
+| httpx2 | 2.16.0 | BSD-3-Clause |
 
 ## Python（上記が引き込む依存）
 
@@ -76,7 +76,7 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 | colorama | 0.4.6 | BSD-3-Clause |
 | greenlet | 3.5.5 | MIT AND PSF-2.0 |
 | h11 | 0.16.0 | MIT |
-| httpcore | 1.0.9 | BSD-3-Clause |
+| httpcore2 | 2.16.0 | BSD-3-Clause |
 | httptools | 0.8.0 | MIT |
 | idna | 3.19 | BSD-3-Clause |
 | iniconfig | 2.3.0 | MIT |
@@ -87,6 +87,7 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 | Pygments | 2.21.0 | BSD-2-Clause |
 | PyYAML | 6.0.3 | MIT |
 | starlette | 1.6.0 | BSD-3-Clause |
+| truststore | 0.10.5 | MIT |
 | typing-extensions | 4.16.0 | PSF-2.0 |
 | typing-inspection | 0.4.4 | MIT |
 | watchfiles | 1.2.0 | MIT |
@@ -94,6 +95,12 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 
 `uvicorn[standard]` が `httptools` / `watchfiles` / `websockets` / `PyYAML` /
 `colorama` を引き込む．`uvloop` は Linux 用で，Windows ではインストールされない．
+
+`httpx2` / `httpcore2` / `truststore` は `starlette` の `TestClient` が使う．
+starlette 1.6 から `httpx` ではなく `httpx2` を使うため入れ替えた（2026-11-01）．
+
+CI の中だけで使うツール（`pip-audit`）は `requirements.txt` に入れておらず，
+この一覧にも載せていない．成果物にも開発環境にも残らないため．
 
 ---
 

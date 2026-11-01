@@ -1,0 +1,32 @@
+# 依存の更新を自動で提案させる設定。
+#
+# pip-audit（.github/workflows/test.yml の audit ジョブ）は「脆弱性がある」
+# ことを教えてくれるが、直すPRは作らない。こちらが更新を上げてくる側。
+# 片方だけでは「見つかったが誰も上げない」か「上がってくるが見ていない」に
+# なるので、2つで組にしている。
+#
+# 更新はPRとして届く。CIのテストが通ることを必ず確認してからマージすること
+# （main への直接コミットは禁止。CONTRIBUTING.md）。
+#
+# 画面側のQRライブラリ（qrcodejs / html5-qrcode）はCDNのURLで読み込んで
+# いるので、ここでは追跡できない。THIRD-PARTY-LICENSES.md に版を書いて
+# あるので、手で確認すること。
+version: 2
+updates:
+  # Python のライブラリ（requirements.txt）
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+
+  # GitHub Actions 自体（actions/checkout などのバージョン）
+  # ここを放置すると、サポートの切れたランナーやアクションを使い続けることになる。
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

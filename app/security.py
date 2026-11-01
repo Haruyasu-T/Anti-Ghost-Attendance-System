@@ -613,16 +613,74 @@ def check_device_binding(db, device_id: str | None, user_id: int) -> DeviceCheck
 
 
 # ==================================================== A-10. レート制限
+#
+# 判定の材料は `audit_logs` の失敗行だけで，専用のカウンタ表やメモリ上の
+# 辞書は持たない．プロセスを再起動しても状態が消えない／既に残している記録を
+# そのまま使える／「なぜ弾かれたか」を後から追える（⑥追跡可能性）．
+#
+# 429 を返したこと自体は `action="rate_limited"` で別に記録する．
+# **数える `action` には含めない．** 含めると，弾かれた試行が次のロックを
+# 延ばしてしまい，待っても解除されなくなる（RATE_LIMITED_ACTION 参照）．
+
+# 制限で弾いた試行を記録するときの `action`．
+# ここで数える `action`（"login" / "attendance_register"）と必ず別の値にすること．
+RATE_LIMITED_ACTION = "rate_limited"
+
+
+def _is_locked_out(
+    db,
+    action: str,
+    column,
+    value,
+    max_failures: int,
+    window_minutes: int,
+    lockout_minutes: int,
+) -> bool:
+    """`action` の失敗を `column == value` で数え，ロック期間内かを返す.
+
+    判定のしかた：
+      直近の失敗を `window_minutes` 分の幅で数え，`max_failures` 件以上
+      あれば，**最後の失敗から `lockout_minutes` の間**は拒否する．
+
+    失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
+    """
+    from app import models
+
+    if not value:
+        return False
+
+    now = _utcnow()
+
+    # ロック解除の判定に必要な分だけ遡れば足りる
+    since = to_iso(now - timedelta(minutes=window_minutes + lockout_minutes))
+
+    # 時刻はUTCの固定長ISO文字列なので，文字列の大小比較で時系列比較になる
+    times = [
+        row[0]
+        for row in db.query(models.AuditLog.occurred_at)
+        .filter(
+            models.AuditLog.action == action,
+            models.AuditLog.result == "failure",
+            column == value,
+            models.AuditLog.occurred_at >= since,
+        )
+        .all()
+    ]
+    if not times:
+        return False
+
+    last_failure = max(from_iso(t) for t in times)
+    if now - last_failure >= timedelta(minutes=lockout_minutes):
+        return False  # ロック期間を過ぎている
+
+    # 最後の失敗から遡って window 分の失敗を数える
+    window_start = last_failure - timedelta(minutes=window_minutes)
+    recent = [t for t in times if from_iso(t) >= window_start]
+    return len(recent) >= max_failures
 
 
 def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bool:
     """ログイン試行を拒否すべきかを判定する.
-
-    判定のしかた：
-      直近の失敗を `LOGIN_WINDOW_MINUTES` 分の幅で数え，`LOGIN_MAX_FAILURES`
-      件以上あれば，**最後の失敗から `LOGIN_LOCKOUT_MINUTES` の間**は拒否する．
-
-    失敗するたびにロックが延びるので，総当たりを続けている限り解除されない．
 
     `login_id` 別と `client_ip` 別の両方を見る．片方だけだと，
       - `login_id` だけ … 1つのIPから多数のIDを総当たりされて素通り
@@ -632,45 +690,53 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
     from app import models
 
     settings = get_settings()
-    now = _utcnow()
-
-    # ロック解除の判定に必要な分だけ遡れば足りる
-    lookback = timedelta(
-        minutes=settings.login_window_minutes + settings.login_lockout_minutes
-    )
-    since = to_iso(now - lookback)
-
-    def _locked_by(column, value) -> bool:
-        if not value:
-            return False
-
-        # 時刻はUTCの固定長ISO文字列なので，文字列の大小比較で時系列比較になる
-        times = [
-            row[0]
-            for row in db.query(models.AuditLog.occurred_at)
-            .filter(
-                models.AuditLog.action == "login",
-                models.AuditLog.result == "failure",
-                column == value,
-                models.AuditLog.occurred_at >= since,
-            )
-            .all()
-        ]
-        if not times:
-            return False
-
-        last_failure = max(from_iso(t) for t in times)
-        if now - last_failure >= timedelta(minutes=settings.login_lockout_minutes):
-            return False  # ロック期間を過ぎている
-
-        # 最後の失敗から遡って window 分の失敗を数える
-        window_start = last_failure - timedelta(minutes=settings.login_window_minutes)
-        recent = [t for t in times if from_iso(t) >= window_start]
-        return len(recent) >= settings.login_max_failures
+    thresholds = {
+        "max_failures": settings.login_max_failures,
+        "window_minutes": settings.login_window_minutes,
+        "lockout_minutes": settings.login_lockout_minutes,
+    }
 
     return (
-        _locked_by(models.AuditLog.attempted_login_id, login_id)
-        or _locked_by(models.AuditLog.client_ip, client_ip)
+        _is_locked_out(
+            db, "login", models.AuditLog.attempted_login_id, login_id, **thresholds
+        )
+        or _is_locked_out(
+            db, "login", models.AuditLog.client_ip, client_ip, **thresholds
+        )
+    )
+
+
+def is_attendance_rate_limited(db, user_id: int | None) -> bool:
+    """出席登録の試行を拒否すべきかを判定する.
+
+    **数えるのは本人（`actor_user_id`）の失敗だけで，IPも端末も見ない．**
+
+      - `client_ip` … 外部にデプロイすると学内Wi-Fiの学生は全員が大学のNATの
+        出口IPで届く．IPで数えると誰か1人の失敗で教室全員が登録できなくなる
+        （`detect_burst` と同じ事情）．
+      - `device_id` … 1台から複数アカウントを回す使い方は `detect_burst` が
+        別に見ている．ここで重ねると，端末を貸し借りした2人目が1人目の失敗で弾かれる．
+
+    閾値はログインよりかなり緩くしてある．**ここで誤って弾くと，本人は授業に
+    出ているのに欠席として残る**ので，取りこぼしより誤検知の方が高くつく．
+
+    そもそもトークンは64ビットで有効期間が10秒前後なので，総当たりはこの制限が
+    無くても成立しない（`TOKEN_LENGTH` のコメント）．ここで止めたいのは，
+    自動化した連打で監査ログとDBを膨らませる使い方に上限を与えることの方．
+    記録を残す仕組み自体を記録で溢れさせられると，⑥追跡可能性が先に壊れる．
+    """
+    from app import models
+
+    settings = get_settings()
+
+    return _is_locked_out(
+        db,
+        "attendance_register",
+        models.AuditLog.actor_user_id,
+        user_id,
+        max_failures=settings.attendance_max_failures,
+        window_minutes=settings.attendance_window_minutes,
+        lockout_minutes=settings.attendance_lockout_minutes,
     )
 
 
