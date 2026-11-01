@@ -278,10 +278,33 @@ def write_audit_log_now(session_factory, **kwargs) -> None: ...
 
 ところが，このあと例外を投げてロールバックする経路（ログイン失敗，出席登録の拒否など）で使うと，**ログごと消えてしまう**．拒否された試行こそ後から追いたい情報なので，そこを取りこぼさないよう `write_audit_log_now` を用意した．こちらは独立したトランザクションで書いて即コミットするので，呼び出し側がロールバックしても残る．
 
+### ⚠️ 呼ぶ前にロールバックすること（`database is locked`）
+
+`write_audit_log_now` は**別のコネクション**を使う．SQLiteは**ファイル単位で
+書き手が1本だけ**なので，呼び出し側の `db` が未コミットの書き込みを抱えていると，
+こちらは永久に書けない．
+
+`require_login` が `login_sessions.last_used_at` を更新しており，その直後の
+`db.get()` がautoflushを起こすので，**エンドポイント本体に入る前からロックは
+握られている**．つまり本体で1回もクエリしていなくても発生する．
+
+```python
+db.rollback()                                      # ← 必ず先に
+security.write_audit_log_now(get_session_factory(), ...)
+raise HTTPException(...)
+```
+
+これを忘れると、同時アクセスがゼロでも**毎回**止まる（1リクエストの中で
+自分自身と衝突するため）．実際に2026-08-29に2回踏んでいる．詳細は decisions.md の **D-21**．
+
+`register_attendance` では `_reject_now` の中に閉じ込めてある．
+**`_reject_now` を通さずに `write_audit_log_now` を直接呼ぶ実装は，レビューで止める．**
+
 呼び出す側の責任：
 
 - 出席登録は成功も失敗も記録する．失敗理由を `detail` に入れる
 - **失敗して例外を投げる経路では `write_audit_log_now` を使う**
+- **その際，呼ぶ前に `db.rollback()` する**（上記）
 - 手動修正は `manual_corrections` への記録と同じトランザクションで行い，ログの書き込みが失敗したら修正をロールバックする
 - `detail` にパスワードとトークンを入れない．秘密鍵の混入は実装側でも弾いているが，約束事として守ること
 

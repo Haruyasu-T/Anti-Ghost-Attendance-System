@@ -23,16 +23,36 @@
 
 ## DDL
 
+下のDDLは読みやすさを優先して書いた**要約**で，実装の正本は `app/models.py`．
+食い違ったときは `models.py` が正しい．
+
+### 時刻カラムについて
+
+時刻はすべて**UTCのISO 8601文字列（ミリ秒3桁・固定長）**で持つ．
+例：`2026-07-27T01:00:00.000Z`
+
+**`datetime('now')` を使ってはいけない．** SQLiteの `datetime('now')` は
+`"YYYY-MM-DD HH:MM:SS"` を返し，`T` と `Z` が付かず，ミリ秒も無い．
+だから `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')` を使う．
+
+桁数まで固定する理由は，**時刻の範囲検索を文字列の大小比較でやっている**ため．
+同じ瞬間を `…:00Z` と `…:00.000Z` の両方で表すと，`.`(0x2E) は `Z`(0x5A) より
+小さいので後者が常に「古い」と判定される．そうなるとレート制限が失敗を
+数え落とし，総当たりがすり抜ける．
+
+`models.py` では全ての時刻カラムに，この書式を強制するCHECK制約
+（`GLOB` による桁数チェック）を付けている．下のDDLでは省略している．
+
 ### users
 
 ```sql
 CREATE TABLE users (
     id            INTEGER PRIMARY KEY,
     login_id      TEXT    NOT NULL UNIQUE,   -- 学生は学籍番号，教員は職員番号
-    role          TEXT    NOT NULL CHECK (role IN ('student', 'teacher')),
+    role          TEXT    NOT NULL CHECK (role IN ('student', 'teacher', 'admin')),
     display_name  TEXT    NOT NULL,
     password_hash TEXT    NOT NULL,
-    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -46,7 +66,7 @@ CREATE TABLE users (
 CREATE TABLE login_sessions (
     id_hash      TEXT    PRIMARY KEY,   -- セッションIDのSHA-256
     user_id      INTEGER NOT NULL REFERENCES users(id),
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     last_used_at TEXT    NOT NULL,
     expires_at   TEXT    NOT NULL,
     revoked_at   TEXT,                  -- NULLなら有効
@@ -72,7 +92,7 @@ CREATE TABLE courses (
     id         INTEGER PRIMARY KEY,
     name       TEXT    NOT NULL,
     teacher_id INTEGER NOT NULL REFERENCES users(id),
-    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -167,7 +187,7 @@ CREATE TABLE manual_corrections (
     after_status          TEXT    NOT NULL,
     reason                TEXT    NOT NULL,
     client_ip             TEXT,
-    corrected_at          TEXT    NOT NULL DEFAULT (datetime('now'))
+    corrected_at          TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 ```
 
@@ -193,7 +213,7 @@ CREATE TABLE device_bindings (
 ```sql
 CREATE TABLE audit_logs (
     id                 INTEGER PRIMARY KEY,
-    occurred_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+    occurred_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     action             TEXT    NOT NULL,
     result             TEXT    NOT NULL CHECK (result IN ('success', 'failure')),
     actor_user_id      INTEGER REFERENCES users(id),

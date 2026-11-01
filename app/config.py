@@ -54,6 +54,19 @@ def _int_or_default(name: str, default: int) -> int:
         raise ConfigError(f"{name} は整数で指定してください（現在の値: {raw!r}）") from exc
 
 
+def _bool_or_default(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise ConfigError(
+        f"{name} は true / false で指定してください（現在の値: {raw!r}）"
+    )
+
+
 def _parse_cidrs(raw: str) -> tuple:
     """カンマ区切りのCIDRを解析する．1つでも不正なら起動を止める."""
     networks = []
@@ -110,6 +123,12 @@ class Settings:
     # 詳しくは security.get_client_ip のコメントを参照．
     trusted_proxy_count: int
 
+    # --- セキュリティヘッダー ---
+    # true にすると CSP を Report-Only で送る（違反を報告するが止めない）．
+    # 実地テスト中にQRの読み取りが動かなくなったときの逃げ道．
+    # **既定は false（強制）**．緩める側を既定にしない（⑤安全なデフォルト）．
+    csp_report_only: bool
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -134,6 +153,7 @@ def get_settings() -> Settings:
         burst_threshold_count=_int_or_default("BURST_THRESHOLD_COUNT", 3),
         burst_window_seconds=_int_or_default("BURST_WINDOW_SECONDS", 60),
         trusted_proxy_count=_int_or_default("TRUSTED_PROXY_COUNT", 0),
+        csp_report_only=_bool_or_default("CSP_REPORT_ONLY", False),
     )
 
     if settings.qr_rotate_seconds <= 0:
