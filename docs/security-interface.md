@@ -255,13 +255,34 @@ def is_attendance_rate_limited(db, user_id: int | None) -> bool: ...
 
 閾値はログインよりかなり緩い．**誤って弾くと，授業に出ている学生が欠席として残る**ので，取りこぼしより誤検知の方が高くつく．そもそもトークンは64ビットで有効期間が10秒前後なので，総当たりはこの制限が無くても成立しない．ここで止めたいのは，自動化した連打で監査ログとDBを膨らませる使い方に上限を与えること（D-22）．
 
-#### ⚠️ 弾いた試行は別の `action` で記録すること
+#### ⚠️ 弾いた試行の記録には条件が2つある
 
-429 を返したこと自体も記録する．「総当たりを受けていたが止めた」が後から追えないと，攻撃の記録として使えない．
+```python
+def should_log_login_rate_limit(db, login_id: str | None,
+                                client_ip: str | None) -> bool: ...
 
-ただし記録するときの `action` は **`security.RATE_LIMITED_ACTION`（`'rate_limited'`）** を使う．`'login'` や `'attendance_register'` の失敗として書くと，**弾いた試行がそれ自体で次のロックを延ばし，待っても永久に解除されない**．出席登録では学生が授業中ずっと登録できなくなる．
+def should_log_attendance_rate_limit(db, user_id: int | None) -> bool: ...
+```
 
-`_reject_now`（`main.py`）を通すとこの `action` で書けないので，429 の経路だけは通さずに書いている．
+429 を返したこと自体も記録する．「総当たりを受けていたが止めた」が後から追えないと，攻撃の記録として使えない．ただし：
+
+**1. `action` は `security.RATE_LIMITED_ACTION`（`'rate_limited'`）を使う．** `'login'` や `'attendance_register'` の失敗として書くと，**弾いた試行がそれ自体で次のロックを延ばし，待っても永久に解除されない**．出席登録では学生が授業中ずっと登録できなくなる．
+
+**2. 書くのはロック期間に1回だけ．** `should_log_*` が `True` のときだけ書く．毎回書くと1リクエスト＝1行で `audit_logs` が増え続け，制限をかけた目的（記録を残す仕組みを記録で溢れさせられないこと）が達成できない．代わりに「何回叩かれたか」は分からなくなる．
+
+#### ⚠️ `should_log_*` は `db.rollback()` より先に呼ぶこと
+
+```python
+first_rejection = security.should_log_attendance_rate_limit(db, user.id)  # 読む
+db.rollback()                                                            # 手放す
+if first_rejection:
+    security.write_audit_log_now(get_session_factory(), ...)              # 書く
+raise HTTPException(status_code=429, detail="...")
+```
+
+ロールバックの**後**に `db` を読むと読み取りロックを取り直してしまい，直後の `write_audit_log_now` がコミットできずに `database is locked` に戻る（D-21）．**D-21 の条件は「書く前に手放す」だけでなく，「手放した後に読み直さない」まで．**
+
+`_reject_now`（`main.py`）はこの `action` で書けないので，429 の経路だけは通さずに書いている．
 
 ### 異常検知
 

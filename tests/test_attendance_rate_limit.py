@@ -177,7 +177,29 @@ def test_blocked_attempts_are_audited(tmp_path, monkeypatch):
         db.close()
         _reset_engine()
 
-    assert rejected >= 1
+    assert rejected == 1
+
+
+def test_blocked_attempts_are_audited_only_once(tmp_path, monkeypatch):
+    """連打されても記録は1件に留めること.
+
+    弾くたびに書くと，1リクエスト＝1行で audit_logs が増え続ける．
+    **記録を残す仕組みを記録で溢れさせられる**ので、制限をかけた意味が半分
+    無くなる。攻撃の有無は1行あれば判断できるので、行数の上限を取った（D-22）。
+    """
+    db, ids = _fixture(tmp_path, monkeypatch)
+    try:
+        client, csrf = _signed_in(db, "S0001")
+        _fail_until_blocked(client, csrf, ids)
+        for _ in range(5):
+            assert _register(client, csrf, ids, BAD_TOKEN).status_code == 429
+        rejected = _count(db, security.RATE_LIMITED_ACTION)
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+        _reset_engine()
+
+    assert rejected == 1
 
 
 def test_the_block_does_not_extend_itself(tmp_path, monkeypatch):

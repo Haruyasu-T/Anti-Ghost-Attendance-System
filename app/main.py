@@ -413,15 +413,24 @@ def login(
         # 後から追えないと，攻撃の記録として使えない（⑥追跡可能性）．
         # action は security.RATE_LIMITED_ACTION（失敗回数に数えない値）．
         # ここを "login" で書くとロックが自分で延び続け，待っても解除されなくなる．
-        db.rollback()
-        security.write_audit_log_now(
-            get_session_factory(),
-            action=security.RATE_LIMITED_ACTION,
-            result="failure",
-            attempted_login_id=payload.login_id,
-            client_ip=client_ip,
-            detail="login",
+        #
+        # 記録するのはロック期間に1回だけ（毎回書くと連打で audit_logs が
+        # 増え続ける）．その判定は **db.rollback() より先に**済ませること．
+        # ロールバックの後に db を読むと読み取りロックを取り直し，直後の
+        # write_audit_log_now がコミットできずに D-21 のロック待ちに戻る．
+        first_rejection = security.should_log_login_rate_limit(
+            db, payload.login_id, client_ip
         )
+        db.rollback()
+        if first_rejection:
+            security.write_audit_log_now(
+                get_session_factory(),
+                action=security.RATE_LIMITED_ACTION,
+                result="failure",
+                attempted_login_id=payload.login_id,
+                client_ip=client_ip,
+                detail="login",
+            )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="しばらく待ってから再度お試しください",
@@ -1355,16 +1364,25 @@ def register_attendance(
     # 失敗として書くと，それが次のロックを延ばして永久に解除されなくなる．
     # 別の action で記録するので，待てば必ず明ける．
     if security.is_attendance_rate_limited(db, user.id):
+        # 記録はロック期間に1回だけ．毎回書くと，弾いているあいだも
+        # 1リクエスト＝1行で audit_logs が増え続け，制限をかけた目的の半分
+        # （記録を記録で溢れさせられないこと）が達成できない．
+        #
+        # この判定は **db.rollback() より先に**済ませること．ロールバックの後に
+        # db を読むと読み取りロックを取り直してしまい，直後の
+        # write_audit_log_now がコミットできずに D-21 のロック待ちに戻る．
+        first_rejection = security.should_log_attendance_rate_limit(db, user.id)
         db.rollback()
-        security.write_audit_log_now(
-            get_session_factory(),
-            action=security.RATE_LIMITED_ACTION,
-            result="failure",
-            actor_user_id=user.id,
-            client_ip=client_ip,
-            device_id=device_id,
-            detail="attendance_register",
-        )
+        if first_rejection:
+            security.write_audit_log_now(
+                get_session_factory(),
+                action=security.RATE_LIMITED_ACTION,
+                result="failure",
+                actor_user_id=user.id,
+                client_ip=client_ip,
+                device_id=device_id,
+                detail="attendance_register",
+            )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="読み取りの失敗が続いています。少し待ってからもう一度お試しください",
