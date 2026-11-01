@@ -224,6 +224,111 @@ def test_successful_logins_are_not_counted(db):
     assert security.is_login_rate_limited(db, "S0001", "192.168.1.10") is False
 
 
+def _add_attendance_failure(db, user, at, action="attendance_register",
+                            client_ip="192.168.1.10"):
+    db.add(models.AuditLog(
+        occurred_at=_iso(at), action=action, result="failure",
+        actor_user_id=user.id, client_ip=client_ip,
+    ))
+
+
+def test_attendance_not_limited_without_failures(db, students):
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
+def test_attendance_not_limited_below_threshold(db, students):
+    """閾値未満では止めないこと（正常系の対照）.
+
+    読み取りに数回しくじるのはカメラの性質上よくあること。ここで止めると
+    「授業に出ているのに欠席」になるので、閾値はログインより緩くしてある。
+    """
+    now = datetime.now(timezone.utc)
+    for i in range(config.get_settings().attendance_max_failures - 1):
+        _add_attendance_failure(db, students[0], now - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
+def test_attendance_limited_after_threshold(db, students):
+    now = datetime.now(timezone.utc)
+    for i in range(config.get_settings().attendance_max_failures):
+        _add_attendance_failure(db, students[0], now - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_attendance_rate_limited(db, students[0].id) is True
+
+
+def test_attendance_limit_ignores_the_shared_ip(db, students):
+    """同じIPから別人が失敗しても巻き添えにしないこと.
+
+    **これが一番落としてはいけない性質。** 外部にデプロイすると学内Wi-Fiの
+    学生は全員が大学のNATの出口IPで届くので、IPで数えると教室の誰か1人が
+    失敗を積むだけで全員が出席登録できなくなる。
+    """
+    now = datetime.now(timezone.utc)
+    shared_ip = "192.168.1.10"
+    for i, student in enumerate(students[1:]):
+        for j in range(config.get_settings().attendance_max_failures):
+            _add_attendance_failure(
+                db, student, now - timedelta(seconds=i * 10 + j), client_ip=shared_ip
+            )
+    db.flush()
+
+    # 他の3人が閾値を超えて失敗していても、まだ失敗していない本人は通る
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
+def test_attendance_limit_does_not_count_its_own_rejections(db, students):
+    """制限で弾いた記録を失敗として数えないこと.
+
+    数えてしまうと、弾かれた試行が次のロックを延ばし、待っても解除されない。
+    学生は授業中ずっと登録できなくなるので、再読み取りを連打されたときに
+    一番効いてくる。action を分けている理由がこれ。
+    """
+    now = datetime.now(timezone.utc)
+    settings = config.get_settings()
+
+    # ロック期間を過ぎた失敗（これだけなら解除されている）
+    long_ago = now - timedelta(minutes=settings.attendance_lockout_minutes + 1)
+    for i in range(settings.attendance_max_failures):
+        _add_attendance_failure(db, students[0], long_ago - timedelta(seconds=i))
+
+    # そのあと弾かれ続けた記録が直前まで残っている
+    for i in range(settings.attendance_max_failures * 3):
+        _add_attendance_failure(
+            db, students[0], now - timedelta(seconds=i),
+            action=security.RATE_LIMITED_ACTION,
+        )
+    db.flush()
+
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
+def test_attendance_lock_expires_after_lockout_period(db, students):
+    settings = config.get_settings()
+    long_ago = datetime.now(timezone.utc) - timedelta(
+        minutes=settings.attendance_lockout_minutes + 1
+    )
+    for i in range(settings.attendance_max_failures):
+        _add_attendance_failure(db, students[0], long_ago - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
+def test_attendance_limit_ignores_login_failures(db, students):
+    """ログインの失敗で出席登録を止めないこと（action を取り違えない）."""
+    now = datetime.now(timezone.utc)
+    for i in range(config.get_settings().attendance_max_failures):
+        _add_attendance_failure(
+            db, students[0], now - timedelta(seconds=i), action="login"
+        )
+    db.flush()
+
+    assert security.is_attendance_rate_limited(db, students[0].id) is False
+
+
 # ================================================== A-11. バースト検知
 
 

@@ -113,6 +113,13 @@ class Settings:
     login_window_minutes: int
     login_lockout_minutes: int
 
+    # --- 出席登録のレート制限 ---
+    # ログインよりかなり緩い．誤って弾くと「出席しているのに欠席」になるため
+    # （security.is_attendance_rate_limited を参照）．
+    attendance_max_failures: int
+    attendance_window_minutes: int
+    attendance_lockout_minutes: int
+
     # --- バースト検知 ---
     burst_threshold_count: int
     burst_window_seconds: int
@@ -150,6 +157,9 @@ def get_settings() -> Settings:
         login_max_failures=_int_or_default("LOGIN_MAX_FAILURES", 5),
         login_window_minutes=_int_or_default("LOGIN_WINDOW_MINUTES", 10),
         login_lockout_minutes=_int_or_default("LOGIN_LOCKOUT_MINUTES", 15),
+        attendance_max_failures=_int_or_default("ATTENDANCE_MAX_FAILURES", 10),
+        attendance_window_minutes=_int_or_default("ATTENDANCE_WINDOW_MINUTES", 5),
+        attendance_lockout_minutes=_int_or_default("ATTENDANCE_LOCKOUT_MINUTES", 2),
         burst_threshold_count=_int_or_default("BURST_THRESHOLD_COUNT", 3),
         burst_window_seconds=_int_or_default("BURST_WINDOW_SECONDS", 60),
         trusted_proxy_count=_int_or_default("TRUSTED_PROXY_COUNT", 0),
@@ -168,5 +178,19 @@ def get_settings() -> Settings:
         raise ConfigError(
             "LATE_UNTIL_MINUTES は PRESENT_AFTER_MINUTES 以上にしてください。"
         )
+
+    # レート制限の閾値は1以上でなければならない。0 を許すと「失敗が0件以上あれば
+    # 拒否」になり、1度でも失敗が残っている相手を永久に締め出す。
+    # 緩めるつもりで 0 を書いて逆に全面禁止になるのが最悪なので、起動時に止める。
+    for name, value in (
+        ("LOGIN_MAX_FAILURES", settings.login_max_failures),
+        ("LOGIN_WINDOW_MINUTES", settings.login_window_minutes),
+        ("LOGIN_LOCKOUT_MINUTES", settings.login_lockout_minutes),
+        ("ATTENDANCE_MAX_FAILURES", settings.attendance_max_failures),
+        ("ATTENDANCE_WINDOW_MINUTES", settings.attendance_window_minutes),
+        ("ATTENDANCE_LOCKOUT_MINUTES", settings.attendance_lockout_minutes),
+    ):
+        if value <= 0:
+            raise ConfigError(f"{name} は1以上にしてください。")
 
     return settings

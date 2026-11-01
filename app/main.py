@@ -409,6 +409,19 @@ def login(
     client_ip = security.get_client_ip(request)
 
     if security.is_login_rate_limited(db, payload.login_id, client_ip):
+        # 制限で弾いたことも記録する．「総当たりを受けていたが止めた」が
+        # 後から追えないと，攻撃の記録として使えない（⑥追跡可能性）．
+        # action は security.RATE_LIMITED_ACTION（失敗回数に数えない値）．
+        # ここを "login" で書くとロックが自分で延び続け，待っても解除されなくなる．
+        db.rollback()
+        security.write_audit_log_now(
+            get_session_factory(),
+            action=security.RATE_LIMITED_ACTION,
+            result="failure",
+            attempted_login_id=payload.login_id,
+            client_ip=client_ip,
+            detail="login",
+        )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="しばらく待ってから再度お試しください",
@@ -1335,6 +1348,27 @@ def register_attendance(
             **log_extra,
         )
         return HTTPException(status_code=status_code, detail=detail)
+
+    # 3.5 レート制限．以降のどの検証よりも先に見る（D-22）．
+    #
+    # 429 だけは `_reject_now` を通さない．弾いた試行を "attendance_register" の
+    # 失敗として書くと，それが次のロックを延ばして永久に解除されなくなる．
+    # 別の action で記録するので，待てば必ず明ける．
+    if security.is_attendance_rate_limited(db, user.id):
+        db.rollback()
+        security.write_audit_log_now(
+            get_session_factory(),
+            action=security.RATE_LIMITED_ACTION,
+            result="failure",
+            actor_user_id=user.id,
+            client_ip=client_ip,
+            device_id=device_id,
+            detail="attendance_register",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="読み取りの失敗が続いています。少し待ってからもう一度お試しください",
+        )
 
     # 4. IP検証．トークン検証より先に行う（D-5）．
     if not security.is_campus_ip(client_ip):
