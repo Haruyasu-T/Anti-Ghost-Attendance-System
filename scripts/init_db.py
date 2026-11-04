@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """Create all database tables for the configured environment.
 
 Run this idempotent command from the repository root before the app starts:

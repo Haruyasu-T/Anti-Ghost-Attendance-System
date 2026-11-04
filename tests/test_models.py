@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """models.py（B-1）の契約テスト．
 
 実装より先に「**DBが何を拒否しなければならないか**」を定義する．

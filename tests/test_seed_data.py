@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """初期データ投入（B-2）のテスト.
 
 投入した中身が「実機テストに使える形」になっているかを確認する．

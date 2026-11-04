@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """ログインセッション（A-6）と監査ログ（A-8）のテスト．
 
 B-1（models.py）が揃うまでは自動でスキップされる．

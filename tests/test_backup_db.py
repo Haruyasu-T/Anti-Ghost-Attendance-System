@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """バックアップスクリプトのテスト（scripts/backup_db.py）．
 
 「取れた」だけでは意味がない．**元と同じ中身が入っていること**と，

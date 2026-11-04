@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """認可の依存関数（A-7）．
 
 `security.py` はHTTPを知らない純粋なロジックに保ちたいので，

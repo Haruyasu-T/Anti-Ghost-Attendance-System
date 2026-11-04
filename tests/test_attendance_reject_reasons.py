@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """出席登録を拒否したときの「理由」の返し方を固定する.
 
 画面（scan.js）は拒否の理由をそのまま学生に見せる．サーバーが理由を

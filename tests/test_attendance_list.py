@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """出席状況一覧（GET /attendance-sessions/{id}/attendances）のテスト.
 
 画面（attendance-list.js）が使う値が実際に返っているかを見る．

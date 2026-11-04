@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """タイミング攻撃への対策が実際に効いているかを測る．
 
 `security.py` には応答時間の差から情報が漏れないようにした箇所がある．

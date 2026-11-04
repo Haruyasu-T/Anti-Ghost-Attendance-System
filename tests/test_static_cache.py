@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """静的ファイルのキャッシュ対策のテスト（app/assets.py）．
 
 scan.js を直したのにブラウザが古い版を使い続けた，という実際の不具合に対する

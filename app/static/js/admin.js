@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 
 // DOMは createElement と textContent で組み立てる。文字列連結でHTMLを作らない

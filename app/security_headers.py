@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """HTTPレスポンスのセキュリティヘッダー（A-10）．
 
 `security.py` はHTTPから切り離す方針（security-interface.md）なので，

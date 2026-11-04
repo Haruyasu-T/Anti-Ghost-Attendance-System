@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """DBのバックアップを取り，その場で検証する．
 
     python -m scripts.backup_db

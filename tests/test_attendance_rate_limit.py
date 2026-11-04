@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """出席登録のレート制限（A-10）をエンドポイント越しに固定する.
 
 判定そのものの単体テストは tests/test_detection.py にある．ここで見るのは

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """管理者機能（D-17）のテスト.
 
 管理者は授業と履修の割り当てだけを行い，出席記録には触れない．

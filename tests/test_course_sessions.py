@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """授業の出席セッション一覧（GET /courses/{id}/attendance-sessions）のテスト.
 
 画面が「開催中の回があるか」を判断するために使うAPI．

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """管理者による学生・教員アカウントの一覧取得と作成。
 
 main.py に依存せず、認可・DB・ハッシュ化は既存の共通モジュールを使う。

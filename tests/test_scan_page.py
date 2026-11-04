@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """読み取り画面（/scan）のテスト.
 
 QRを読むと `/scan?s=...&t=...` に直接着地する．ログインが切れていたときに

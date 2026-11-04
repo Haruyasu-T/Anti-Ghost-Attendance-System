@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """設定値の読み込み（A-1）．
 
 セキュリティに関わる値をコードに直書きしないための入り口．

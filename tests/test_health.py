@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """アプリが起動し，ヘルスチェックが応答することを確認する．
 
 フェーズ3のテストが揃うまでの土台となる最小のテスト．

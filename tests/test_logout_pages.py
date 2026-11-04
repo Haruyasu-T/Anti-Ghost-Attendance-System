@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """Every authenticated page must supply a working CSRF-protected logout."""
 
 import datetime as dt

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """セキュリティヘッダーのテスト（app/security_headers.py）．
 
 ヘッダーは「付いていないこと」に気付きにくい．ミドルウェアを外したり
