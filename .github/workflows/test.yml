@@ -26,7 +26,7 @@ jobs:
           CAMPUS_IP_RANGES: 192.168.0.0/16
         run: pytest -v
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
