@@ -8,7 +8,7 @@ bcrypt>=4.1
 python-dotenv>=1.0
 
 # テスト
-pytest>=8.0
+pytest>=9.2.0
 # TestClient（starlette）が使うHTTPクライアント．直接 import はしていない．
 # starlette 1.6 から httpx ではなく httpx2 を使う．httpx のままでも
 # 当面は動くが、非推奨の警告が出ており、いずれ TestClient が動かなくなる
