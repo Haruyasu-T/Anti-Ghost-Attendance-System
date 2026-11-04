@@ -58,6 +58,14 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # pip / setuptools はランナーに最初から入っているものを使うので、
+          # requirements.txt とは無関係に古いまま引っかかる。初回（2026-11-04）は
+          # setuptools 79.0.1 の PYSEC-2026-3447 と GHSA-xmj3-9gf7-h52w で落ちた。
+          #
+          # 除外ではなく上げて直す。どちらもパッケージを「入れる」ときに働く
+          # 問題で、動いているアプリには関係しないが、土台の古さで赤いままに
+          # すると、本当に見たい依存側の警告が埋もれる。
+          pip install --upgrade pip setuptools
           pip install -r requirements.txt
           pip install pip-audit
 
