@@ -20,6 +20,8 @@ button,.btn,.action-card { min-height:44px; }
 .site-footer { padding:1.25rem max(1rem,calc((100vw - 1120px)/2)); border-top:1px solid var(--line); background:var(--surface); }
 .site-footer p { margin:0; font-size:.85rem; }
 .site-footer a { color:var(--muted); }
+/* デンソーウェーブの登録商標文。小さくするが、読める大きさは保つ（先方が「読みやすい書体とサイズで」としている） */
+.trademark,.site-footer .trademark { margin:.4rem 0 0; color:var(--muted); font-size:.75rem; }
 .license-notice { padding:1rem; overflow-x:auto; font-size:.8rem; line-height:1.5; white-space:pre-wrap; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); }
 .credits { margin:0; padding-left:1.25rem; line-height:1.9; }
 /* QR投影画面は教室の後方から見せるので、余計な要素を出さない */

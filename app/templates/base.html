@@ -37,6 +37,11 @@
     {% block footer %}
     <footer class="site-footer">
         <p><a href="/about">このシステムについて・ライセンス</a></p>
+        {# デンソーウェーブの登録商標文。「QRコード」の名称を使う画面ごとに掲載するよう
+           求められているため、全ページ共通のここに置く。ただし投影画面
+           （projector-page）はこのフッターをCSSで隠すので、teacher_qr.html に
+           同じ一文を直接置いてある。片方だけ消すと掲載漏れになる。 #}
+        <p class="trademark">QRコードは株式会社デンソーウェーブの登録商標です</p>
     </footer>
     {% endblock %}
     <div id="live-region" class="sr-only" aria-live="polite"></div>

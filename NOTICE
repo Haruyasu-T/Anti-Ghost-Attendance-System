@@ -1,0 +1,26 @@
+Anti-Ghost Attendance System
+学内Wi-Fi連動 QR出席管理システム
+
+Copyright 2026 田中晴康 (Haruyasu-T)
+
+Licensed under the Apache License, Version 2.0 (the "License").
+You may obtain a copy of the License in the LICENSE file at the root of
+this repository, or at http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------
+
+このリポジトリは3人チームで開発した成果物である．各メンバーと担当は
+README.md の「製作者」に記載している．
+
+このリポジトリには第三者のソフトウェアを同梱していない（実行時に取得する）．
+利用しているソフトウェアの一覧と，それぞれのライセンス・著作権者は
+THIRD-PARTY-LICENSES.md に記載している．
+
+--------------------------------------------------------------------------
+
+商標 / Trademarks
+
+QRコードは株式会社デンソーウェーブの登録商標です
+
+QR Code is a registered trademark of DENSO WAVE INCORPORATED in Japan and in
+other countries.
