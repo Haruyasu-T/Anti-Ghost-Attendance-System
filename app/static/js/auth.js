@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 const form=document.querySelector("#login-form"),errorBox=document.querySelector("#login-error");
 form&&form.addEventListener("submit",async function(event){

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 const shell = document.querySelector(".scanner-shell"),
   readerId = "qr-reader",

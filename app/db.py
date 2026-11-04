@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """DBの接続とセッションの受け渡し．
 
 暫定的に担当Aが作った．FastAPIの依存関数（`app/auth.py`）がDBセッションを

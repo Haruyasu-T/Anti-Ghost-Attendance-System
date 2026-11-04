@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 const tbody=document.querySelector("#history-rows"),errorBox=document.querySelector("#history-error"),labels={present:"出席",late:"遅刻",absent:"欠席"};
 function cell(value){const td=document.createElement("td");td.textContent=value==null?"":String(value);return td;}

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """`/about`（ライセンス表示）のテスト．
 
 ライセンス表示は**利用者が見られる場所に置く**必要がある．認証の後ろに隠すと

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 // Run with: node tests/test_teacher_qr_js.cjs
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 田中晴康
+// SPDX-License-Identifier: Apache-2.0
+
 "use strict";
 const root=document.querySelector("[data-attendance-list]"),sessionId=root.dataset.sessionId,csrf=root.dataset.csrfToken,tbody=document.querySelector("#attendance-rows"),dialog=document.querySelector("#correction-dialog"),errorBox=document.querySelector("#list-error");
 const labels={present:"出席",late:"遅刻",absent:"欠席"};

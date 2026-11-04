@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """セキュリティの中核（担当A / A-2〜A-5）．
 
 契約は [docs/security-interface.md](../docs/security-interface.md) を参照．

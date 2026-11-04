@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """端末の紐付け（A-9）・レート制限（A-10）・バースト検知（A-11）のテスト．
 
 いずれも「検知はするがブロックはしない」もの（A-9/A-11）と、

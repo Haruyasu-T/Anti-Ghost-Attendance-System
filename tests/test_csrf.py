@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """CSRF対策のテスト．
 
 トークンの導出（security.py）と、ミドルウェアによる強制（auth.py）の両方を見る。

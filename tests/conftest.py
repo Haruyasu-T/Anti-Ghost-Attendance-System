@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """テスト共通の設定．
 
 各テストが .env や CI の環境変数に依存しないよう，設定を明示的に固定する．

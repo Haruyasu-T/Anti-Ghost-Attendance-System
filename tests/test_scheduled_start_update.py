@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """授業開始時刻の変更（PUT /attendance-sessions/{id}/scheduled-start）のテスト．
 
 確認すること：

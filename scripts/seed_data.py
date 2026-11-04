@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """動作確認用の初期データを投入する（B-2）.
 
     python -m scripts.init_db      # 先にテーブルを作る

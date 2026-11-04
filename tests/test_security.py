@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 田中晴康
+# SPDX-License-Identifier: Apache-2.0
+
 """security.py（A-2〜A-5）のテスト．
 
 [docs/phase3-tasks.md](../docs/phase3-tasks.md) の完了条件をそのままテストにしている．
