@@ -1,16 +1,26 @@
-fastapi>=0.162.0
-uvicorn[standard]>=0.54.0
-sqlalchemy>=2.1.6
-pydantic>=2.14.2
-python-multipart>=0.0.33
-jinja2>=3.1.6
-bcrypt>=5.0.0
-python-dotenv>=1.2.4
+# 版は `==` で固定している。
+#
+# 下限だけの指定（`>=`）にすると、入れた日の最新版が入る。つまり
+# **テストを通した組み合わせと、サーバーで動く組み合わせが一致しない**。
+# 授業中に落ちたときに「コードが悪いのか版が悪いのか」を切り分けられなくなるので、
+# 動作確認した版をそのまま書く。
+#
+# ここの版は 2026-11-06 に 278件のテストが通った組み合わせ。
+# 更新するときは、上げてからテストを通して、通った版を書き直すこと。
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+sqlalchemy==2.1.8
+pydantic==2.14.3
+python-multipart==0.0.33
+jinja2==3.1.6
+bcrypt==5.0.0
+python-dotenv==1.2.4
 
 # テスト
-pytest>=9.2.0
+pytest==9.2.0
 # TestClient（starlette）が使うHTTPクライアント．直接 import はしていない．
 # starlette 1.6 から httpx ではなく httpx2 を使う．httpx のままでも
 # 当面は動くが、非推奨の警告が出ており、いずれ TestClient が動かなくなる
 # ＝テストスイート全体が落ちる．
-httpx2>=2.16
+httpx2==2.16.0

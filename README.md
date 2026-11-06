@@ -48,6 +48,8 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+`requirements.txt` は版を `==` で固定しています．テストを通した組み合わせと，サーバーで動く組み合わせを一致させるためです（[D-24](docs/decisions.md)）．版を上げるときは，入れ直してテストを通してから書き直してください．
+
 Windowsで `activate` が「スクリプトの実行が無効」と言われる場合は，以降のコマンドを `venv\Scripts\python.exe -m ...` の形で実行すれば同じことができます．有効化に失敗したまま `pip install` すると，グローバル側に入ってしまうので注意．
 
 ### 2. 設定
