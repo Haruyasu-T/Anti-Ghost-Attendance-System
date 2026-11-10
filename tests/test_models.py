@@ -14,6 +14,7 @@ B-1 に期待する契約
 
     Base                      … SQLAlchemy の declarative base
     create_db_engine(url)     … Engine を返す．**接続時に PRAGMA foreign_keys = ON**
+                                `wal=True` のときは journal_mode = WAL も発行する
     User, Course, Enrollment, AttendanceSession,
     Attendance, AttendanceScan, LoginSession
 
@@ -133,6 +134,41 @@ def test_foreign_keys_are_enforced(session):
 
     with pytest.raises((IntegrityError, OperationalError)):
         session.flush()
+
+
+# ------------------------------------------------- WALモードの切り替え
+
+def _journal_mode(engine) -> str:
+    with engine.connect() as conn:
+        return conn.exec_driver_sql("PRAGMA journal_mode").scalar().lower()
+
+
+def test_journal_mode_is_not_wal_by_default(tmp_path):
+    """既定ではWALにしないこと.
+
+    WALは同時アクセスが詰まったときの手当てで，実地テストで素の挙動を
+    測る前に入れてしまうと測定の意味がなくなる（`app/config.py` 参照）．
+    """
+    engine = models.create_db_engine(f"sqlite:///{tmp_path / 'default.db'}")
+    assert _journal_mode(engine) == "delete"
+
+
+def test_journal_mode_is_wal_when_requested(tmp_path):
+    """`wal=True` でWALになること（当日これだけで切り替えられる必要がある）."""
+    engine = models.create_db_engine(f"sqlite:///{tmp_path / 'wal.db'}", wal=True)
+    assert _journal_mode(engine) == "wal"
+
+
+def test_foreign_keys_still_on_in_wal_mode(tmp_path):
+    """WALにしても外部キーの有効化が消えないこと.
+
+    PRAGMAを2つ並べたので，片方を書き足したときにもう片方を壊していないかを見る．
+    """
+    engine = models.create_db_engine(f"sqlite:///{tmp_path / 'wal_fk.db'}", wal=True)
+    models.Base.metadata.create_all(engine)
+
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
 
 
 # ------------------------------------------------------- 二重出席の防止

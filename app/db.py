@@ -27,7 +27,8 @@ from app.config import get_settings
 def get_engine():
     from app import models
 
-    return models.create_db_engine(get_settings().database_url)
+    settings = get_settings()
+    return models.create_db_engine(settings.database_url, wal=settings.sqlite_wal)
 
 
 @lru_cache(maxsize=1)
