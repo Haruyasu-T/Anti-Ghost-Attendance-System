@@ -139,6 +139,23 @@ class Settings:
     # **既定は false（強制）**．緩める側を既定にしない（⑤安全なデフォルト）．
     csp_report_only: bool
 
+    # --- SQLite の書き込み方式 ---
+    # true にすると SQLite を WAL モードで開く．
+    #
+    # 既定のロールバックジャーナルでは「書き手1人」かつ**書き込み中は読み取りも
+    # 待たされる**ため，授業開始直後に全員が同時に登録すると順番待ちが起きる．
+    # 5秒待って空かないと `database is locked` で500になる．
+    # WAL にすると書き手1人と読み手が同時に動けるので，その待ちが大幅に減る．
+    #
+    # **既定は false（素の挙動）**．実地テストで実際に詰まるかを測る前に
+    # 変えてしまうと，測りたかったものが測れない．詰まったときに環境変数だけで
+    # 切り替えられるようにしてある（コードの変更もデプロイも要らない）．
+    #
+    # 注意：journal_mode はDBファイル側に残る設定なので，一度 WAL にすると
+    # この値を false に戻してもファイルは WAL のままである．
+    # 元に戻すには `PRAGMA journal_mode = DELETE` を手で実行する必要がある．
+    sqlite_wal: bool
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -167,6 +184,7 @@ def get_settings() -> Settings:
         burst_window_seconds=_int_or_default("BURST_WINDOW_SECONDS", 60),
         trusted_proxy_count=_int_or_default("TRUSTED_PROXY_COUNT", 0),
         csp_report_only=_bool_or_default("CSP_REPORT_ONLY", False),
+        sqlite_wal=_bool_or_default("SQLITE_WAL", False),
     )
 
     if settings.qr_rotate_seconds <= 0:

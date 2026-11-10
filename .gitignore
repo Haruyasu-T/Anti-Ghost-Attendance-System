@@ -22,6 +22,16 @@ env/
 *.sqlite
 *.sqlite3
 
+# WALモード（SQLITE_WAL=true）で作られる付属ファイル。
+# 名前が attendance.db-wal のようになるので、上の *.db では弾けない。
+# -wal には**まだ本体に書き戻していない中身**がそのまま入っている。
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
 # エディタ
 .vscode/
 .idea/

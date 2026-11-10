@@ -98,21 +98,31 @@ def _iso8601_utc_check(column_name: str, constraint_name: str,
 _UTC_NOW_ISO8601 = text("(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))")
 
 
-def create_db_engine(url: str, **kwargs) -> Engine:
+def create_db_engine(url: str, *, wal: bool = False, **kwargs) -> Engine:
     """Engine を作成する．
 
     SQLite の場合，接続の都度 `PRAGMA foreign_keys = ON` を発行し，
     外部キー制約を有効化する（SQLite はデフォルトで無効なため）．
+
+    `wal=True` のときは `PRAGMA journal_mode = WAL` も発行する．既定の
+    ロールバックジャーナルは書き込み中に読み取りも待たせるため，同時アクセスが
+    集中すると `database is locked` になりうる．切り替えは設定で行う
+    （`SQLITE_WAL`．理由は `app/config.py` を参照）．
+
+    **WAL は冪等ではない**：journal_mode はDBファイル側に残るので，一度 WAL に
+    したファイルは `wal=False` で開いても WAL のままである．
     """
     engine = create_engine(url, **kwargs)
 
     @event.listens_for(engine, "connect")
-    def _enable_sqlite_foreign_keys(dbapi_connection, connection_record):  # noqa: ANN001
+    def _configure_sqlite(dbapi_connection, connection_record):  # noqa: ANN001
         # SQLite 以外のドライバでは PRAGMA が存在しないため，
         # sqlite3 コネクションの場合のみ実行する．
         if type(dbapi_connection).__module__.startswith("sqlite3"):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys = ON")
+            if wal:
+                cursor.execute("PRAGMA journal_mode = WAL")
             cursor.close()
 
     return engine
