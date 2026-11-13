@@ -33,6 +33,10 @@ jobs:
       - name: Verify QR actions
         run: node tests/test_teacher_qr_js.cjs
 
+      # ズームはカメラの能力で分岐するので、手元の実機では片側しか試せない。
+      - name: Verify scanner zoom
+        run: node tests/test_scan_zoom_js.cjs
+
   # 依存ライブラリに既知の脆弱性が無いかを調べる。
   #
   # テストとは別のジョブにしている。落ちる理由が「自分たちのコードが壊れた」
