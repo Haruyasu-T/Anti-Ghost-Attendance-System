@@ -108,7 +108,10 @@ async function main() {
     const moved = run({capabilities: {zoom: {min: 1, max: 4, step: 0.5}}});
     await moved.startScan();
     moved.slide(2.5);
-    assert.deepEqual(moved.applied, [{advanced: [{zoom: 2.5}]}], "ズーム値を渡すこと");
+    // vm の中で作られたオブジェクトは Object.prototype が別（realm が違う）ため、
+    // deepStrictEqual は中身が同じでも落ちる。値を直接見る。
+    assert.equal(moved.applied.length, 1, "1回だけ渡すこと");
+    assert.equal(moved.applied[0].advanced[0].zoom, 2.5, "ズーム値を渡すこと");
     assert.equal(moved.value.textContent, "2.5倍", "倍率の表示を更新すること");
 
     // --- 連続で動かしても重ねて投げない ---
