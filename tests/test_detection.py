@@ -200,6 +200,89 @@ def test_other_user_is_not_affected(db):
     assert security.is_login_rate_limited(db, "S0002", "192.168.1.10") is False
 
 
+def test_campus_ip_does_not_lock_out_everyone(db):
+    """学内IPでは、別々の人の失敗を1つのカウンタに積まないこと（D-26）.
+
+    学内Wi-Fiの学生は全員が大学のNATの出口IPで届く。ここをIPで数えると、
+    **各自が自分のIDを打ち間違えただけで教室の全員が締め出される**。
+    実地テスト（2026-11-12）で実際に起きた。
+    """
+    now = datetime.now(timezone.utc)
+    campus_ip = "192.168.1.10"
+    for i in range(config.get_settings().login_max_failures):
+        _add_login_failure(db, f"S000{i}", campus_ip, now - timedelta(seconds=i))
+    db.flush()
+
+    # まだ一度も失敗していない人が、巻き添えで止められないこと
+    assert security.is_login_rate_limited(db, "S9999", campus_ip) is False
+
+
+def test_campus_ip_still_limited_by_login_id(db):
+    """学内でも、同じIDを狙い続ければ止まること.
+
+    IP側を外したぶん、学内からの総当たりはこちらだけで守ることになる。
+    ここが効かなくなると穴になるので固定しておく。
+    """
+    now = datetime.now(timezone.utc)
+    campus_ip = "192.168.1.10"
+    for i in range(config.get_settings().login_max_failures):
+        _add_login_failure(db, "S0001", campus_ip, now - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_login_rate_limited(db, "S0001", campus_ip) is True
+
+
+def test_off_campus_ip_is_still_counted(db):
+    """学外IPでは従来どおりIPで数えること（D-26で外したのは学内だけ）."""
+    now = datetime.now(timezone.utc)
+    off_campus = "203.0.113.5"
+    for i in range(config.get_settings().login_max_failures):
+        _add_login_failure(db, f"S000{i}", off_campus, now - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_login_rate_limited(db, "S9999", off_campus) is True
+
+
+def test_unknown_client_ip_is_not_bucketed(db):
+    """IPが取れないときはIP側で数えないこと（`login_id` 側だけで守る）.
+
+    `_is_locked_out` は値が無ければ False を返す。空の値を1つの束にすると、
+    IPを取れなかった利用者どうしが互いを締め出すことになるため。
+    学内IPを外したのと同じ理由で、こちらも束ねない。
+    **IPが取れない経路では `login_id` 別の制限だけが働く。**
+    """
+    now = datetime.now(timezone.utc)
+    for i in range(config.get_settings().login_max_failures):
+        _add_login_failure(db, f"S000{i}", None, now - timedelta(seconds=i))
+    db.flush()
+
+    assert security.is_login_rate_limited(db, "S9999", None) is False
+
+
+def test_campus_lockouts_are_each_recorded(db):
+    """学内で別の人が締め出されたとき、記録が握りつぶされないこと.
+
+    記録の重複排除もIPで見ていると、同じ出口IPなので「最近書いた」と判定され、
+    2人目以降が締め出された事実が残らない。誰が止まったのかを追えるようにする。
+    """
+    now = datetime.now(timezone.utc)
+    campus_ip = "192.168.1.10"
+    db.add(models.AuditLog(
+        occurred_at=_iso(now - timedelta(seconds=10)),
+        action=security.RATE_LIMITED_ACTION,
+        result="failure",
+        attempted_login_id="S0001",
+        client_ip=campus_ip,
+        detail="login",
+    ))
+    db.flush()
+
+    # 同じ人は書かない（重複排除は効く）
+    assert security.should_log_login_rate_limit(db, "S0001", campus_ip) is False
+    # 別の人は、同じ学内IPでも書く
+    assert security.should_log_login_rate_limit(db, "S0002", campus_ip) is True
+
+
 def test_lock_expires_after_lockout_period(db):
     """最後の失敗から一定時間が経てば解除されること."""
     settings = config.get_settings()
