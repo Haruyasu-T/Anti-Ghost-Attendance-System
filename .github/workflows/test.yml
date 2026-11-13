@@ -37,6 +37,11 @@ jobs:
       - name: Verify scanner zoom
         run: node tests/test_scan_zoom_js.cjs
 
+      # 教員画面の注意表示。サーバー側はPython側で固定してあるが、
+      # 2つのAPIを突き合わせて描くところはここでしか見ていない。
+      - name: Verify attendance list alerts
+        run: node tests/test_attendance_list_js.cjs
+
   # 依存ライブラリに既知の脆弱性が無いかを調べる。
   #
   # テストとは別のジョブにしている。落ちる理由が「自分たちのコードが壊れた」
