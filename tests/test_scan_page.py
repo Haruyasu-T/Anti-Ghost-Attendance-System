@@ -7,12 +7,16 @@ QRを読むと `/scan?s=...&t=...` に直接着地する．ログインが切れ
 何が返るかは授業中に学生が見るものなので，形式まで含めて固定しておく．
 """
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app import models, security
 from app.db import get_db
 from app.main import app
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _test_db(tmp_path) -> Session:
@@ -63,6 +67,53 @@ def test_scan_guidance_extends_the_shared_layout(tmp_path):
     assert "本文へ移動" in response.text          # スキップリンク
     assert 'class="brand"' in response.text       # 共通ヘッダー
     assert 'id="live-region"' in response.text    # 読み上げ用の領域
+
+
+def _student_client(db, tmp_path) -> TestClient:
+    db.add(models.User(
+        login_id="S0001",
+        role="student",
+        display_name="学生01",
+        password_hash=security.hash_password("student-password"),
+    ))
+    db.commit()
+    client = _client(db)
+    client.post("/auth/login", json={"login_id": "S0001", "password": "student-password"})
+    return client
+
+
+def test_scan_page_ships_the_zoom_control_hidden(tmp_path):
+    """ズームの操作列を持ち，既定では隠れていること.
+
+    後方の席からだとQRが小さいという声が実地テストで出たので足した機能．
+    対応しているかはカメラ次第なので，**起動して能力を確かめるまでは出さない**．
+    非対応の端末で操作できる見た目だけ出すと，動かないものを触らせることになる．
+    """
+    db = _test_db(tmp_path)
+    try:
+        response = _student_client(db, tmp_path).get("/scan")
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+
+    assert response.status_code == 200
+    assert 'id="zoom-row"' in response.text
+    assert 'id="zoom"' in response.text
+    # hidden が外れていると、非対応の端末でも出てしまう
+    assert 'class="zoom-row" hidden' in response.text
+
+
+def test_zoom_row_is_really_hidden_by_css(tmp_path):
+    """`[hidden]` を CSS で打ち消していないこと.
+
+    `.zoom-row { display:flex }` は `[hidden]` の `display:none`（UA由来）に
+    **勝ってしまう**ので、明示的に打ち消す必要がある。これが無いと
+    HTMLに hidden が付いていても画面には出る。`.btn[hidden]` と同じ事情。
+    """
+    css = (REPO_ROOT / "app" / "static" / "css" / "style.css").read_text(encoding="utf-8")
+
+    assert ".zoom-row[hidden]" in css, "hidden を打ち消す指定が無い"
+    assert "display:none" in css.split(".zoom-row[hidden]")[1].split("}")[0]
 
 
 def test_teacher_cannot_open_the_scan_page(tmp_path):

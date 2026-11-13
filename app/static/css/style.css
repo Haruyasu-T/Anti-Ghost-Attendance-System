@@ -75,6 +75,13 @@ input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible { o
 .input-help { margin:.1rem 0 0; font-size:.88rem; }
 .scanner-shell { display:grid; gap:1rem; max-width:640px; margin:0 auto; }
 #qr-reader { overflow:hidden; min-height:260px; background:#101828; border-radius:var(--radius); }
+/* ズームの操作列。`display:flex` は `[hidden]` の display:none に勝ってしまうので，
+   .btn と同じように明示的に打ち消す（これが無いと非対応の端末でも出てしまう）。 */
+.zoom-row { display:flex; align-items:center; gap:.75rem; }
+.zoom-row[hidden] { display:none; }
+.zoom-row label { color:var(--muted); font-size:.9rem; white-space:nowrap; }
+.zoom-row input[type=range] { flex:1; min-width:0; }
+.zoom-value { color:var(--muted); font-size:.9rem; width:3.5rem; text-align:right; font-variant-numeric:tabular-nums; }
 .result-card { text-align:center; }
 .result-symbol { display:grid; place-items:center; width:72px; height:72px; margin:0 auto 1rem; border-radius:50%; font-size:2.2rem; font-weight:900; }
 .result-success .result-symbol { color:var(--success); background:var(--success-bg); }

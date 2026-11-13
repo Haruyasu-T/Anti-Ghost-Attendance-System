@@ -7,9 +7,31 @@ content %}
     <p class="eyebrow">出席登録</p>
     <h1>QRを読み取る</h1>
     <p class="muted">カメラへのアクセスを許可してください。</p>
+    {#- 実地テストで、VPN経由の学生が学外として拒否された（2026-11-12）。
+        出口IPが事業者のものになるため、教室にいても学内と判定できない。
+        IP検証を採っている以上は仕組みで直せないので、ここで案内する。 -#}
+    <p class="muted">
+      VPNを使っていると学外からの接続として扱われます。学内Wi-Fiに接続し、VPNを切ってから読み取ってください。
+    </p>
     <button id="start-scan" class="btn btn-primary">カメラ起動</button>
   </div>
   <div id="qr-reader" aria-label="QRコード読み取り領域"></div>
+  {#- ズームはカメラが対応している端末でしか動かないので、起動後に能力を
+      問い合わせてから scan.js が hidden を外す。非対応の端末で操作できる
+      見た目だけ出すと「動かない」と受け取られるため、既定は隠す。 -#}
+  <div id="zoom-row" class="zoom-row" hidden>
+    <label for="zoom">ズーム</label>
+    <input
+      id="zoom"
+      type="range"
+      min="1"
+      max="1"
+      step="0.1"
+      value="1"
+      aria-describedby="zoom-value"
+    />
+    <span id="zoom-value" class="zoom-value" aria-live="off">1.0倍</span>
+  </div>
   <section id="scan-result" class="card result-card" hidden aria-live="assertive">
     <div class="result-symbol" aria-hidden="true"></div>
     <h2 id="result-title"></h2>
