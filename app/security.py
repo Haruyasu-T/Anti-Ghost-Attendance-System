@@ -710,6 +710,23 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
       - `login_id` だけ … 1つのIPから多数のIDを総当たりされて素通り
       - `client_ip` だけ … 分散したIPから1つのIDを狙われて素通り
     のどちらかを取り逃す．
+
+    **ただし学内IPは `client_ip` 側で数えない**（D-26）．学内Wi-Fiの学生は
+    全員が大学のNATの出口IPで届くので，IPで数えると**人数分の失敗が1つの
+    カウンタに積み上がる**．実地テスト（2026-11-12，7人）で，
+    各自が自分のIDを打ち間違えただけで**全員が429で締め出された**．
+
+    数えたままにすると，授業の直前に誰か1人が5回失敗するだけで，その教室の
+    全員が出席登録できなくなる．妨害として成立してしまう．
+
+    `client_ip` 側を残す目的は「1つのホストからIDを変えて総当たり」を止める
+    ことなので，**共有が前提の学内IPでは目的を果たせない**．学外からの
+    総当たりには従来どおり効く．判定不能（None・解析できない値）は学外として
+    扱うので，こちらも従来どおり数える．
+
+    **残る穴：** 学内からの総当たりは `login_id` 別の制限だけで守ることになる．
+    1アカウントにつき5回までなので「1アカウントを破る」ことはできないが，
+    「多数のアカウントに5回ずつ試す」は止まらない．D-26に記録した．
     """
     from app import models
 
@@ -720,13 +737,16 @@ def is_login_rate_limited(db, login_id: str | None, client_ip: str | None) -> bo
         "lockout_minutes": settings.login_lockout_minutes,
     }
 
-    return (
-        _is_locked_out(
-            db, "login", models.AuditLog.attempted_login_id, login_id, **thresholds
-        )
-        or _is_locked_out(
-            db, "login", models.AuditLog.client_ip, client_ip, **thresholds
-        )
+    if _is_locked_out(
+        db, "login", models.AuditLog.attempted_login_id, login_id, **thresholds
+    ):
+        return True
+
+    if is_campus_ip(client_ip):
+        return False
+
+    return _is_locked_out(
+        db, "login", models.AuditLog.client_ip, client_ip, **thresholds
     )
 
 
@@ -735,18 +755,26 @@ def should_log_login_rate_limit(db, login_id: str | None, client_ip: str | None)
 
     `is_login_rate_limited` と対で使う．**`db.rollback()` より先に呼ぶこと**
     （`should_log_attendance_rate_limit` の説明を参照）．
+
+    **学内IPは `client_ip` 側を見ない**（`is_login_rate_limited` と揃える）．
+    揃えないと，学内で誰か1人が制限にかかった記録が残っている間，**別の人が
+    制限にかかっても記録されない**（同じ出口IPなので「最近書いた」と判定される）．
+    誰が締め出されたのかが追えなくなるので，こちらも学内IPでは見ない．
     """
     from app import models
 
     within = get_settings().login_lockout_minutes
 
-    return not (
-        _logged_rate_limit_recently(
-            db, models.AuditLog.attempted_login_id, login_id, within
-        )
-        or _logged_rate_limit_recently(
-            db, models.AuditLog.client_ip, client_ip, within
-        )
+    if _logged_rate_limit_recently(
+        db, models.AuditLog.attempted_login_id, login_id, within
+    ):
+        return False
+
+    if is_campus_ip(client_ip):
+        return True
+
+    return not _logged_rate_limit_recently(
+        db, models.AuditLog.client_ip, client_ip, within
     )
 
 
