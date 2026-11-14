@@ -48,7 +48,19 @@ source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-`requirements.txt` は版を `==` で固定しています．テストを通した組み合わせと，サーバーで動く組み合わせを一致させるためです（[D-24](docs/decisions.md)）．版を上げるときは，入れ直してテストを通してから書き直してください．
+依存のファイルは2つあり，用途が違います（[D-24](docs/decisions.md) / [D-27](docs/decisions.md)）．
+
+| ファイル | 誰が使うか | 中身 |
+|---|---|---|
+| `requirements.txt` | **手元の開発とCI** | 直接使う10個を `==` で固定 |
+| `requirements.lock` | **サーバー** | 間接依存まで含めた33個を固定（Linux / Python 3.11 向け） |
+
+**手元では `requirements.txt` を使ってください．** `requirements.lock` はCIが実際に
+入れた版の一覧で，Linux専用です（`uvloop` がWindowsに無いなど）．
+
+版を上げるときは，入れ直してテストを通してから `requirements.txt` を書き直します．
+`requirements.lock` は**CIが緑になった実行の `Record the installed set` の出力**から
+作り直してください（手元の `pip freeze` は使わない）．
 
 Windowsで `activate` が「スクリプトの実行が無効」と言われる場合は，以降のコマンドを `venv\Scripts\python.exe -m ...` の形で実行すれば同じことができます．有効化に失敗したまま `pip install` すると，グローバル側に入ってしまうので注意．
 
