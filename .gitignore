@@ -16,6 +16,10 @@ env/
 .env.*
 !.env.example
 
+# Node（開発ツール＝Prettier 用。配布物には入らない）
+# package.json / package-lock.json は版を固定するためコミットする。
+node_modules/
+
 # データベース
 # 学籍番号やパスワードハッシュが入る。拡張子は3種類とも塞ぐ。
 *.db

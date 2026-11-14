@@ -7,6 +7,7 @@ QRを読むと `/scan?s=...&t=...` に直接着地する．ログインが切れ
 何が返るかは授業中に学生が見るものなので，形式まで含めて固定しておく．
 """
 
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -113,7 +114,10 @@ def test_zoom_row_is_really_hidden_by_css(tmp_path):
     css = (REPO_ROOT / "app" / "static" / "css" / "style.css").read_text(encoding="utf-8")
 
     assert ".zoom-row[hidden]" in css, "hidden を打ち消す指定が無い"
-    assert "display:none" in css.split(".zoom-row[hidden]")[1].split("}")[0]
+
+    # 整形で `display: none` と空白が入るので、空白を潰してから見る
+    block = css.split(".zoom-row[hidden]")[1].split("}")[0]
+    assert "display:none" in re.sub(r"\s+", "", block)
 
 
 def test_teacher_cannot_open_the_scan_page(tmp_path):

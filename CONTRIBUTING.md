@@ -66,6 +66,21 @@ publicにすれば無料で保護が使えるようになるので，公開の�
 - 長引きそうなブランチは定期的に `main` を取り込む（`git merge main` か `git pull origin main`）
 - 設計文書のシグネチャを変えたくなったら，先に文書を更新してから実装する
 
+## コードの整形
+
+JS と CSS の整形は Prettier に任せている．**手で揃えなくてよい．**
+
+```bash
+npm install          # 初回だけ
+npx prettier --write .
+```
+
+CIで `npx prettier --check .` を見ているので，崩れたままだと落ちる（落ちたら上を実行する）．
+
+**`app/templates/` と `*.md` は対象外**にしてある．Prettier が Jinja の SPDX ヘッダーを
+壊すこと，設計文書の表が全行差分になることが理由で，`.prettierignore` に書いてある
+（[decisions.md](docs/decisions.md) D-28）．**テンプレートとMarkdownは手で整える．**
+
 ## AIを使うときのルール
 
 **AIが生成したコードは必ず「自分で説明できる状態」にする．** 特にセキュリティ機能は，「なぜこの方式か」「限界は何か」を人に説明できるところまでレビューしてからマージする．

@@ -1,0 +1,25 @@
+node_modules/
+venv/
+backups/
+
+# Jinjaテンプレートは整形しない。
+#
+# Prettier は Jinja の構文を知らないので、先頭の SPDX ヘッダーを
+#
+#   {#- SPDX-FileCopyrightText: 2026 田中晴康 -#} {#- SPDX-License-Identifier:
+#   Apache-2.0 -#} {% extends "base.html" %} ...
+#
+# のように詰めて折り返す。Jinja としては有効だが、**SPDX-License-Identifier が
+# 2行に割れる**ので、検査ツールに読ませるという目的（agreed conventions / README の
+# ライセンス節）を果たさなくなる。{% block %} も1行に詰められて読みにくくなる。
+#
+# テンプレートの整形は手で行う。
+app/templates/
+
+# Markdown は整形しない。
+#
+# Prettier は表のパイプを桁揃えするので、表を多用している設計文書が
+# ほぼ全行差分になる。整形が不統一で困っていたのは JS / CSS の方で
+# （1行1481文字のファイルがあった）、文書は読めている。
+# 公開前に文書の全行を書き換えると、履歴から変更点を追えなくなる。
+*.md

@@ -52,6 +52,14 @@ jobs:
       - name: Verify attendance list alerts
         run: node tests/test_attendance_list_js.cjs
 
+      # 整形が崩れたまま入らないようにする。崩れていたら
+      #   npx prettier --write .
+      # で直せる。Jinjaテンプレートは対象外（.prettierignore に理由を記載）。
+      - name: Check formatting
+        run: |
+          npm ci
+          npx prettier --check .
+
   # 依存ライブラリに既知の脆弱性が無いかを調べる。
   #
   # テストとは別のジョブにしている。落ちる理由が「自分たちのコードが壊れた」
