@@ -33,8 +33,7 @@ function detailOf(data) {
 function messageFor(status, data) {
   if (status === 401) return "ログインし直してから、もう一度読み取ってください。";
   if (status === 403) return detailOf(data) || "このQRでは出席登録できませんでした。";
-  if (status === 409)
-    return detailOf(data) || "すでに登録済み、または受付が終了しています。";
+  if (status === 409) return detailOf(data) || "すでに登録済み、または受付が終了しています。";
   return detailOf(data) || "出席登録に失敗しました。もう一度お試しください。";
 }
 async function submit(payload) {
@@ -95,7 +94,12 @@ function setUpZoom() {
   }
 
   // max が無い・min と同じなら、対応していても動かせる幅が無い。出さない。
-  if (!zoom || typeof zoom.min !== "number" || typeof zoom.max !== "number" || zoom.max <= zoom.min) {
+  if (
+    !zoom ||
+    typeof zoom.min !== "number" ||
+    typeof zoom.max !== "number" ||
+    zoom.max <= zoom.min
+  ) {
     zoomRow.hidden = true;
     return;
   }
