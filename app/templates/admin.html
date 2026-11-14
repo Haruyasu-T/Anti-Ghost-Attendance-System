@@ -7,7 +7,11 @@
     <div class="page-heading">
         <p class="eyebrow">管理メニュー</p>
         <h1>管理画面</h1>
-        {% if display_name %}<p class="muted">{{ display_name }}さんとしてログインしています。出席記録の閲覧・修正は担当教員のみが行えます。</p>{% endif %}
+        {% if display_name %}
+        <p class="muted">
+            {{ display_name }}さんとしてログインしています。出席記録の閲覧・修正は担当教員のみが行えます。
+        </p>
+        {% endif %}
     </div>
 
     <div id="admin-error" class="alert alert-error" role="alert" hidden></div>
@@ -15,7 +19,8 @@
     <form id="user-form" class="stack">
         <h2>ユーザーを作成</h2>
         <label for="user-login-id">ログインID（学籍番号・教員ID）</label>
-        <input id="user-login-id" name="login_id" type="text" maxlength="100" autocomplete="off" required>
+        <input id="user-login-id" name="login_id" type="text" maxlength="100"
+               autocomplete="off" required>
         <label for="user-display-name">氏名</label>
         <input id="user-display-name" name="display_name" type="text" maxlength="100" required>
         <label for="user-role">権限</label>
@@ -24,9 +29,11 @@
             <option value="teacher">教員</option>
         </select>
         <label for="user-password">初期パスワード（8〜128文字）</label>
-        <input id="user-password" name="password" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        <input id="user-password" name="password" type="password" minlength="8" maxlength="128"
+               autocomplete="new-password" required>
         <label for="user-password-confirm">初期パスワード（確認）</label>
-        <input id="user-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" required>
+        <input id="user-password-confirm" type="password" minlength="8" maxlength="128"
+               autocomplete="new-password" required>
         <div id="user-error" class="alert alert-error" role="alert" hidden></div>
         <p id="user-created" role="status" hidden></p>
         <div class="button-row"><button class="btn btn-primary" type="submit">保存</button></div>
@@ -34,11 +41,25 @@
 
     <form id="attendance-window-form" class="stack">
         <h2>受付時間（全授業共通）</h2>
-        <p class="muted">変更は開催中の授業を含む、以後の初回出席登録に適用されます。登録済みの出席区分は変わりません。</p>
-        <label>受付開始：授業開始の何分前 <input name="present_before_minutes" type="number" min="0" max="180" step="1" value="{{ attendance_window.present_before_minutes }}" required></label>
-        <label>出席扱い：授業開始の何分後まで <input name="present_after_minutes" type="number" min="0" max="180" step="1" value="{{ attendance_window.present_after_minutes }}" required></label>
+        <p class="muted">
+            変更は開催中の授業を含む、以後の初回出席登録に適用されます。登録済みの出席区分は変わりません。
+        </p>
+        <label>
+            受付開始：授業開始の何分前
+            <input name="present_before_minutes" type="number" min="0" max="180" step="1"
+                   value="{{ attendance_window.present_before_minutes }}" required>
+        </label>
+        <label>
+            出席扱い：授業開始の何分後まで
+            <input name="present_after_minutes" type="number" min="0" max="180" step="1"
+                   value="{{ attendance_window.present_after_minutes }}" required>
+        </label>
         {# 受付終了を0にすると全授業で誰も登録できなくなるので、下限を5分にしている（D-19） #}
-        <label>遅刻受付終了：授業開始の何分後まで <input name="late_until_minutes" type="number" min="5" max="180" step="1" value="{{ attendance_window.late_until_minutes }}" required></label>
+        <label>
+            遅刻受付終了：授業開始の何分後まで
+            <input name="late_until_minutes" type="number" min="5" max="180" step="1"
+                   value="{{ attendance_window.late_until_minutes }}" required>
+        </label>
         <div id="attendance-window-error" class="alert alert-error" role="alert" hidden></div>
         <p id="attendance-window-saved" role="status" hidden>受付時間を保存しました。</p>
         <div class="button-row"><button class="btn btn-primary" type="submit">保存</button></div>
@@ -48,7 +69,9 @@
         <button id="new-course-button" class="btn btn-primary" type="button" disabled>授業を追加</button>
         <button id="admin-retry" class="btn btn-secondary" type="button" hidden>再読み込み</button>
     </div>
-    <p id="no-teachers" class="notice" hidden>教員アカウントがまだありません。授業を追加するには教員アカウントが必要です。</p>
+    <p id="no-teachers" class="notice" hidden>
+        教員アカウントがまだありません。授業を追加するには教員アカウントが必要です。
+    </p>
 
     <div class="table-wrap">
         <table>
@@ -88,7 +111,8 @@
         <form id="enrollment-form" class="dialog-body">
             <h2 id="enrollment-dialog-title">履修者を設定</h2>
             <p id="enrollment-course" class="muted"></p>
-            <div id="enrollment-list" class="checkbox-list" role="group" aria-labelledby="enrollment-dialog-title" aria-busy="false"></div>
+            <div id="enrollment-list" class="checkbox-list" role="group"
+                 aria-labelledby="enrollment-dialog-title" aria-busy="false"></div>
             <p class="muted input-help">履修から外しても、その学生の過去の出席記録は残ります。</p>
             <div id="enrollment-error" class="alert alert-error" role="alert" hidden></div>
             <div class="dialog-actions">

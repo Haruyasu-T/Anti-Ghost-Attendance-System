@@ -12,9 +12,11 @@
     <div id="login-error" class="alert alert-error" role="alert" hidden></div>
     <form id="login-form" class="stack" action="/auth/login" method="post" novalidate>
         <label for="login-id">学籍番号／職員番号</label>
-        <input id="login-id" name="login_id" type="text" autocomplete="username" maxlength="64" required autofocus>
+        <input id="login-id" name="login_id" type="text" autocomplete="username"
+               maxlength="64" required autofocus>
         <label for="password">パスワード</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <input id="password" name="password" type="password"
+               autocomplete="current-password" required>
         <button class="btn btn-primary" type="submit">ログイン</button>
     </form>
 </section>

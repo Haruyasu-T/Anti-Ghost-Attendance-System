@@ -47,7 +47,11 @@ def test_page_token_can_revoke_session(tmp_path, role, path):
             client.cookies.set("session", raw_session)
             response = client.get(path)
             assert response.status_code == 200
-            tokens = re.findall(r'data-logout data-csrf-token="([^"]+)"', response.text)
+            # 属性の間は空白なら何でもよい（HTMLとして等価）ので `\s+` で受ける。
+            # スペース1個に固定していたため、テンプレートの行を折り返しただけで
+            # 7件まとめて落ちた。ここで見たいのは「ログアウト用のトークンが
+            # ページにちょうど1つあること」で、書式ではない。
+            tokens = re.findall(r'data-logout\s+data-csrf-token="([^"]+)"', response.text)
             assert len(tokens) == 1
             assert response.text.count("/static/js/common.js") == 1
             assert client.post("/auth/logout", headers={"X-CSRF-Token": tokens[0]}).status_code == 200
