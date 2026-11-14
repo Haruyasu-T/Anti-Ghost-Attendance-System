@@ -26,20 +26,25 @@
 #   役割が違う：CI＝変化を見つける／ロック＝本番を固定する。
 #
 # ■ 更新のしかた
-#   1. CIが緑になった実行を選ぶ（＝その組み合わせでテストが通っている）
-#   2. その pytest ジョブの "Record the installed set" の出力をここに貼る
-#   3. 先頭のこのコメントは消さない
+#   1. requirements.txt を上げて push する（この時点ではCIが落ちる。
+#      test_versions_agree_between_the_two_files が食い違いを捕まえるため）
+#   2. その実行の pytest ジョブの "Record the installed set" の出力を見る。
+#      このステップはテストより**前**にあるので、テストが落ちていても出力は残る
+#   3. 出力をここに反映する
+#   4. **uvloop にマーカーを付け直す**（`; sys_platform != "win32"`）。
+#      pip freeze はマーカーを出さないので、貼ると消える
 #   手元の pip freeze は使わない（Windows の解決結果になるため）。
 #
 # ■ 出典
-#   2026-11-14 / コミット 9fe3d73 / CIの pytest ジョブ（288件通過）
+#   2026-11-15 / CIの pytest ジョブ（実行 43618862644）の Record the installed set
+#   fastapi 0.162.0 → 0.162.2 に伴う更新。間接依存は1つも動かなかった。
 
 annotated-doc==0.0.6
 annotated-types==0.8.0
 anyio==4.16.0
 bcrypt==5.0.0
 click==8.5.1
-fastapi==0.162.0
+fastapi==0.162.2
 h11==0.16.0
 httpcore2==2.16.0
 httptools==0.9.0

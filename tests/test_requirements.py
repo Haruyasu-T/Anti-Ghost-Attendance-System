@@ -89,6 +89,28 @@ def test_versions_agree_between_the_two_files():
     )
 
 
+def test_uvloop_keeps_its_platform_marker():
+    """`uvloop` にマーカーが付いていること.
+
+    uvloop は Windows に無い。ロックはLinux向けだが，手元で誤って入れたときに
+    **そこだけで止まる**ので，マーカーで読み飛ばせるようにしてある。
+
+    `pip freeze` はマーカーを出さないので，**CIの出力を貼ると消える**。
+    付け直しを忘れやすい一手間なので，ここで固定する（手順は
+    requirements.lock の先頭にも書いてある）。
+    """
+    lock = (REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
+
+    line = next(
+        (l for l in lock.splitlines() if l.strip().startswith("uvloop==")), None
+    )
+    assert line is not None, "uvloop がロックに無い"
+    assert "sys_platform" in line, (
+        f"uvloop にマーカーが付いていない: {line!r}。"
+        'CIの出力を貼ったあと `; sys_platform != "win32"` を付け直すこと'
+    )
+
+
 def test_lock_includes_the_indirect_dependencies_it_exists_for():
     """ロックが間接依存まで含んでいること（D-27の目的そのもの）.
 
