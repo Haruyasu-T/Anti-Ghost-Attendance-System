@@ -77,6 +77,18 @@ HTTPS、秘密値の管理、SQLiteの永続化を必須条件としていた。
 
 3について：**サーバー上では `0.0.0.0` が必要**（他の端末から繋ぐため）。手元の開発では `127.0.0.1` のままにする。
 
+**依存の入れ方について．** サーバーでは `requirements.txt` ではなく
+**`requirements.lock`** を使う。
+
+```
+pip install -r requirements.lock
+```
+
+`requirements.txt` は直接使う10個しか固定していないため，入れた日によって
+starlette などの間接依存が変わる。ロックはCIがテストを通した組み合わせを
+そのまま固定したもので，Linux / Python 3.11 向けである（[decisions.md](decisions.md) D-27）。
+**版を変えるときは必ずロックを作り直してから入れること**（作り方はロックの先頭に記載）。
+
 4で設定するもの（サーバー上の `.env`，または systemd の `Environment=`）。値はGitへコミットしない。
 
 - `TOKEN_SECRET`: 暗号論的乱数32バイト以上

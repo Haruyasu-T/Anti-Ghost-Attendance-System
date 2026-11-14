@@ -17,7 +17,17 @@ jobs:
           cache: pip
 
       - name: Install dependencies
+        # requirements.lock ではなく requirements.txt から入れる。
+        # こうすると間接依存は毎回その時点の最新に解決されるので、上流が
+        # 壊れたことを早く掴める。ロックを回しても「前に通った組み合わせ」を
+        # もう一度通すだけで、新しい問題は見つからない（requirements.lock の
+        # 先頭のコメントと decisions.md D-27 を参照）。
         run: pip install -r requirements.txt
+
+      # requirements.lock を作り直すときは、緑になった実行のこの出力を貼る。
+      # 手元の pip freeze は使わない（Windowsの解決結果になり、uvloop が落ちる）。
+      - name: Record the installed set
+        run: pip freeze --exclude-editable
 
       - name: Run tests
         # テスト実行用のダミー値．本物の秘密鍵は絶対に書かない（GitHub Secretsも使わない）

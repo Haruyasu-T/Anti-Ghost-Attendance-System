@@ -1,0 +1,69 @@
+# サーバーに入れる版を1つ残らず固定したもの（D-27）
+#
+# ■ 何のためか
+#   requirements.txt が固定しているのは**直接書いた10個だけ**で、starlette や
+#   anyio のような間接的に入るものは固定できていない。実際にずれていた：
+#   2026-11-14 時点で手元(Windows)は starlette 1.6.0、CI(Linux)は 1.10.0。
+#   starlette は FastAPI の土台なので、ここが動くと挙動も変わりうる。
+#   このファイルは**テストが通った組み合わせそのまま**を残す。
+#
+# ■ どこで使うか
+#   サーバー：  pip install -r requirements.lock
+#   手元の開発：pip install -r requirements.txt （こちらを使う。下記の理由）
+#   CI：        requirements.txt （こちらも意図的。下記の理由）
+#
+# ■ Linux / Python 3.11 向けである
+#   この一覧はCI（ubuntu-latest / Python 3.11）が実際に入れた版で、
+#   サーバーと同じ環境のもの。**Windowsでは使わないこと。**
+#   uvloop は Windows に無いのでマーカーを付けてあるが、逆に Windows でだけ
+#   必要になるもの（click が要求する colorama など）はこの一覧に入っていない。
+#
+# ■ CIがこのファイルを使わない理由
+#   CIは requirements.txt から入れる。そうすると間接依存は毎回その時点の
+#   最新に解決されるので、**上流が壊れたことを早く掴める**。
+#   ロックで固定したものを回しても、それは「前に通った組み合わせ」を
+#   もう一度通すだけで、新しい問題は見つからない。
+#   役割が違う：CI＝変化を見つける／ロック＝本番を固定する。
+#
+# ■ 更新のしかた
+#   1. CIが緑になった実行を選ぶ（＝その組み合わせでテストが通っている）
+#   2. その pytest ジョブの "Record the installed set" の出力をここに貼る
+#   3. 先頭のこのコメントは消さない
+#   手元の pip freeze は使わない（Windows の解決結果になるため）。
+#
+# ■ 出典
+#   2026-11-14 / コミット 9fe3d73 / CIの pytest ジョブ（288件通過）
+
+annotated-doc==0.0.6
+annotated-types==0.8.0
+anyio==4.16.0
+bcrypt==5.0.0
+click==8.5.1
+fastapi==0.162.0
+h11==0.16.0
+httpcore2==2.16.0
+httptools==0.9.0
+httpx2==2.16.0
+idna==3.20
+iniconfig==2.3.1
+jinja2==3.1.6
+MarkupSafe==3.0.4
+opentelemetry-api==1.45.2
+packaging==26.3
+pluggy==1.7.0
+pydantic==2.14.3
+pydantic-core==2.50.4
+pygments==2.21.0
+pytest==9.2.0
+python-dotenv==1.2.4
+python-multipart==0.0.33
+pyyaml==6.0.3
+sqlalchemy==2.1.8
+starlette==1.10.0
+truststore==0.10.5
+typing-extensions==4.16.0
+typing-inspection==0.4.5
+uvicorn==0.54.0
+uvloop==0.23.0 ; sys_platform != "win32"
+watchfiles==1.3.0
+websockets==17.4
