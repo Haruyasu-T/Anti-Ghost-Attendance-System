@@ -89,6 +89,54 @@ def test_versions_agree_between_the_two_files():
     )
 
 
+def _licensed_packages() -> dict[str, str]:
+    """THIRD-PARTY-LICENSES.md の表から「パッケージ名 → 版」を読む."""
+    text = (REPO_ROOT / "THIRD-PARTY-LICENSES.md").read_text(encoding="utf-8")
+    found: dict[str, str] = {}
+    for row in re.finditer(
+        r"^\|\s*([A-Za-z0-9._-]+)\s*\|\s*([0-9][^\s|]*)\s*\|", text, re.M
+    ):
+        found[_normalize(row.group(1))] = row.group(2)
+    return found
+
+
+def test_license_document_lists_every_locked_package():
+    """ロックにあるものが，ライセンス文書にすべて載っていること.
+
+    載っていないパッケージがあると，**何に依存しているかの一覧として
+    成立しない**（この文書の目的そのもの）。
+    """
+    locked = _parse(REPO_ROOT / "requirements.lock")
+    listed = _licensed_packages()
+
+    missing = sorted(set(locked) - set(listed))
+    assert not missing, (
+        f"THIRD-PARTY-LICENSES.md に無い: {missing}。"
+        "依存を足したら、ロックと一緒にこの文書も更新すること"
+    )
+
+
+def test_license_document_versions_match_the_lock():
+    """ライセンス文書の版がロックと一致していること.
+
+    **2026-11-01 から 11-15 の間に9個の版がずれていた**（fastapi 0.141.1 と
+    書いてあるのに実際は 0.162.2 など）。動かしても気付かないので、ここで見る。
+    """
+    locked = _parse(REPO_ROOT / "requirements.lock")
+    listed = _licensed_packages()
+
+    disagreed = {
+        name: (locked[name], listed[name])
+        for name in sorted(set(locked) & set(listed))
+        if locked[name] != listed[name]
+    }
+
+    assert not disagreed, (
+        "THIRD-PARTY-LICENSES.md とロックで版が違う（左: lock / 右: 文書）: "
+        f"{disagreed}"
+    )
+
+
 def test_uvloop_keeps_its_platform_marker():
     """`uvloop` にマーカーが付いていること.
 

@@ -16,8 +16,9 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 2. 将来 Docker イメージや配布物にまとめる場合，**その時点で義務が発生する**ため，
    先に一覧を作っておく
 
-`certifi` のみ MPL-2.0（弱いコピーレフト）で，他とは条件が異なる．
-ファイル単位の開示義務なので，改変せずに使う限り影響はない．
+**現時点では，コピーレフトのライセンスを持つ依存は1つも無い**（MIT / BSD /
+Apache-2.0 / PSF-2.0 のみ）．以前は `certifi` が MPL-2.0 で唯一の例外だったが，
+`httpx2` が `truststore` を使う構成になり，依存から外れた（2026-11-15 時点）．
 
 ---
 
@@ -40,86 +41,119 @@ MIT や Apache 2.0 の著作権表示義務は，**コピーを再配布する�
 
 ---
 
-## Python（実行時に必要なもの）
+## Python
 
-`requirements.txt` に直接書いているもの．
+**版は `requirements.lock` と一致させている．** サーバーに入るのはこのファイルで，
+Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md) D-27）．
+
+### 直接指定しているもの（`requirements.txt`）
 
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
-| fastapi | 0.141.1 | MIT |
-| uvicorn | 0.52.4 | BSD-3-Clause |
-| sqlalchemy | 2.0.52 | MIT |
-| pydantic | 2.13.5 | MIT |
-| python-multipart | 0.0.32 | Apache-2.0 |
+| fastapi | 0.162.2 | MIT |
+| uvicorn | 0.54.0 | BSD-3-Clause |
+| sqlalchemy | 2.1.8 | MIT |
+| pydantic | 2.14.3 | MIT |
+| python-multipart | 0.0.33 | Apache-2.0 |
 | jinja2 | 3.1.6 | BSD-3-Clause |
 | bcrypt | 5.0.0 | Apache-2.0 |
-| python-dotenv | 1.2.3 | BSD-3-Clause |
+| python-dotenv | 1.2.4 | BSD-3-Clause |
 
-## Python（テストのみ）
+### テストのみ
 
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
-| pytest | 9.1.1 | MIT |
+| pytest | 9.2.0 | MIT |
 | httpx2 | 2.16.0 | BSD-3-Clause |
 
-## Python（上記が引き込む依存）
+### 上記が引き込むもの
 
-直接指定していないが，インストールされるもの．
+直接指定していないが，インストールされる．
 
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
-| annotated-doc | 0.0.5 | MIT |
+| annotated-doc | 0.0.6 | MIT |
 | annotated-types | 0.8.0 | MIT |
-| anyio | 4.14.2 | MIT |
-| certifi | 2026.7.22 | **MPL-2.0** |
-| click | 8.5.0 | BSD-3-Clause |
-| colorama | 0.4.6 | BSD-3-Clause |
-| greenlet | 3.5.5 | MIT AND PSF-2.0 |
+| anyio | 4.16.0 | MIT |
+| click | 8.5.1 | BSD-3-Clause |
 | h11 | 0.16.0 | MIT |
 | httpcore2 | 2.16.0 | BSD-3-Clause |
-| httptools | 0.8.0 | MIT |
-| idna | 3.19 | BSD-3-Clause |
-| iniconfig | 2.3.0 | MIT |
-| MarkupSafe | 3.0.3 | BSD-3-Clause |
+| httptools | 0.9.0 | MIT |
+| idna | 3.20 | BSD-3-Clause |
+| iniconfig | 2.3.1 | MIT |
+| MarkupSafe | 3.0.4 | BSD-3-Clause |
+| opentelemetry-api | 1.45.2 | Apache-2.0 |
 | packaging | 26.3 | Apache-2.0 OR BSD-2-Clause |
-| pluggy | 1.6.0 | MIT |
-| pydantic-core | 2.46.5 | MIT |
+| pluggy | 1.7.0 | MIT |
+| pydantic-core | 2.50.4 | MIT |
 | Pygments | 2.21.0 | BSD-2-Clause |
 | PyYAML | 6.0.3 | MIT |
-| starlette | 1.6.0 | BSD-3-Clause |
+| starlette | 1.10.0 | BSD-3-Clause |
 | truststore | 0.10.5 | MIT |
 | typing-extensions | 4.16.0 | PSF-2.0 |
-| typing-inspection | 0.4.4 | MIT |
-| watchfiles | 1.2.0 | MIT |
-| websockets | 17.1 | BSD-3-Clause |
+| typing-inspection | 0.4.5 | MIT |
+| uvloop | 0.23.0 | Apache-2.0 OR MIT（両方のライセンスファイルを同梱） |
+| watchfiles | 1.3.0 | MIT |
+| websockets | 17.4 | BSD-3-Clause |
 
 `uvicorn[standard]` が `httptools` / `watchfiles` / `websockets` / `PyYAML` /
-`colorama` を引き込む．`uvloop` は Linux 用で，Windows ではインストールされない．
+`uvloop` を引き込む．**`uvloop` は Linux 専用**で，Windows ではインストール
+されない（`requirements.lock` でマーカーを付けている）．逆に Windows では
+`click` が `colorama` を要求するが，サーバーはLinuxなのでこの一覧には入れていない．
 
 `httpx2` / `httpcore2` / `truststore` は `starlette` の `TestClient` が使う．
 starlette 1.6 から `httpx` ではなく `httpx2` を使うため入れ替えた（2026-11-01）．
+`certifi` はこの入れ替えで依存から外れた（`truststore` がOSの証明書ストアを使うため）．
 
-CI の中だけで使うツール（`pip-audit`）は `requirements.txt` に入れておらず，
-この一覧にも載せていない．成果物にも開発環境にも残らないため．
+開発・CIの中だけで使うツールは，`requirements.txt` にも この一覧にも入れていない．
+成果物に含まれないため．該当するのは `pip-audit`（CI）と `prettier`（整形・
+`package.json` の devDependencies）．
 
 ---
 
 ## この一覧の作り方
 
-手で書き写すと必ずずれるので，インストール済みのパッケージのメタデータから
-生成する．
+手で書き写すと必ずずれる（実際，2026-11-01 から 11-15 の間に9個の版がずれていた）ので，
+**`requirements.lock` を正として**，インストール済みパッケージのメタデータから生成する．
 
 ```bash
 python -c "
-import importlib.metadata as md
-for d in sorted(md.distributions(), key=lambda x: (x.metadata['Name'] or '').lower()):
-    n = d.metadata['Name']
-    if not n: continue
-    lic = d.metadata.get('License-Expression') or d.metadata['License'] or ''
-    print(f'| {n} | {d.version} | {lic.strip().splitlines()[0] if lic.strip() else \"(分類子を参照)\"} |')
+import re, pathlib, importlib.metadata as md
+norm = lambda n: re.sub(r'[-_.]+', '-', n).lower()
+lock = dict(
+    (norm(m.group(1)), (m.group(1), m.group(2)))
+    for m in (
+        re.match(r'^([A-Za-z0-9._-]+)==([^\s;]+)', l.strip())
+        for l in pathlib.Path('requirements.lock').read_text(encoding='utf-8').splitlines()
+        if l.strip() and not l.strip().startswith('#')
+    ) if m
+)
+installed = dict((norm(d.metadata['Name']), d) for d in md.distributions() if d.metadata['Name'])
+for key in sorted(lock):
+    name, ver = lock[key]
+    d = installed.get(key)
+    if d is None:
+        print(f'| {name} | {ver} | **手元に無い（別途確認）** |'); continue
+    lic = (d.metadata.get('License-Expression') or d.metadata['License'] or '').strip()
+    print(f'| {name} | {ver} | {lic.splitlines()[0] if lic else \"(分類子を参照)\"} |')
 "
 ```
 
-依存を追加・更新したら，この文書も更新する．
+**手元がWindowsだと `uvloop` だけ出てこない**（Linux専用）．そのときはLinux用の
+wheelからメタデータを読む．
 
-最終確認日：2026-11-01
+```bash
+pip download --no-deps --platform manylinux_2_17_x86_64 --python-version 3.11 \
+    --only-binary=:all: uvloop==0.23.0 -d /tmp/uvloop
+python -c "
+import zipfile, glob
+with zipfile.ZipFile(glob.glob('/tmp/uvloop/*.whl')[0]) as z:
+    name = [n for n in z.namelist() if n.endswith('.dist-info/METADATA')][0]
+    print('\n'.join(l for l in z.read(name).decode().splitlines()
+                    if l.startswith(('License', 'Classifier: License'))))
+"
+```
+
+依存を追加・更新したら，**`requirements.lock` と一緒にこの文書も更新する**．
+
+最終確認日：2026-11-15（`requirements.lock` の33件すべてと突き合わせ済み）

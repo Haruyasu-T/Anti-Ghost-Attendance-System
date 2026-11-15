@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# このワークフローは読むだけで、リポジトリに書き込まない。
+# 明示しないと GITHUB_TOKEN にリポジトリ設定の既定の権限が付く。
+# 公開後は誰でもPRを出せるので、ワークフローが持つ権限は最小にしておく（原則②最小権限）。
+permissions:
+  contents: read
+
 jobs:
   pytest:
     runs-on: ubuntu-latest
