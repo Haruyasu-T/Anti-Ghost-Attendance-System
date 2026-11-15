@@ -1,6 +1,6 @@
 # 学内Wi-Fi連動 QR出席管理システム
 
-**Anti-Ghost Attendance System (AGAS)** — version 0.1.0
+**Anti-Ghost Attendance System (AGAS)** — version 1.0.0
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -151,12 +151,15 @@ AIの説明に根拠が示されないときは差し戻し，誤りがあった
 
 ## バージョン
 
-`0.1.0`．タグはまだ付けていません．
+`1.0.0`．
 
-部活内での実地テストは **2026-11-12 に実施済み**です（結果は
-[test-report.md](docs/test-report.md)）。そこで見つかった不具合
+部活内での実地テストを **2026-11-12 に実施**し（結果は
+[test-report.md](docs/test-report.md)），そこで見つかった不具合
 （学内IPの共有でログインが巻き添えになる問題・[decisions.md](docs/decisions.md) D-26）
-の修正まで含めた版に `1.0.0` を付けます．
+を修正した版です．
+
+実地テストで**測れなかったこと**も test-report.md に明記しています．
+同時アクセスの性能は，ログインの不具合で測定が成立しませんでした．
 
 ## ライセンス
 

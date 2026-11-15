@@ -62,6 +62,24 @@ def test_about_does_not_show_student_ids():
     assert re.search(r"\d", credits.group(1)) is None
 
 
+def test_readme_version_matches_the_code():
+    """READMEの版表記が `__version__` と一致していること.
+
+    `app/__init__.py` が正本で，`/about` 画面もREADMEもこの値を出す．
+    「更新時は両方を直すこと」とコメントに書いてあるが，**手の約束は破られる**
+    （ライセンス文書が2週間ずれていたのと同じ）ので，ここで固定する．
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    versions = set(re.findall(r"version (\d+\.\d+\.\d+)", readme))
+    versions |= set(re.findall(r"^`(\d+\.\d+\.\d+)`", readme, re.M))
+
+    assert versions, "READMEに版の表記が見つからない"
+    assert versions == {__version__}, (
+        f"READMEの版が __version__（{__version__}）と違う: {sorted(versions)}"
+    )
+
+
 def test_notice_names_the_copyright_holder():
     """著作権者は `NOTICE` に書くこと（Apache 2.0 の作法）．
 
