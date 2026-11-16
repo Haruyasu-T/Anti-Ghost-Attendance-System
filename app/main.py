@@ -550,8 +550,12 @@ def me(user: models.User = Depends(require_login)):
 #
 # 認可は require_course_owner / require_session_owner に任せ，ここには
 # 「担当授業か」の if を書かない（api-design.md「認可チェックの書き方」）．
-# course.teacher_id / sess.created_by は依存関数の時点で「ログイン中の教員
-# 本人」であることが保証済みなので，監査ログの actor_user_id にもそのまま使う．
+#
+# **ただし監査ログの actor_user_id に `sess.created_by` を使ってはいけない．**
+# 依存関数が保証するのは「ログイン中の教員がいまの担当である」ことだけで，
+# `created_by`（セッションを作った人）とは**別人になり得る**．
+# 管理者が担当教員を変えると，新担当の操作が旧担当の名前で記録されてしまう。
+# 操作者は `Depends(require_role("teacher"))` で受け取ること（2026-11-16 修正）。
 
 @app.post(
     "/courses/{course_id}/attendance-sessions",
@@ -692,6 +696,7 @@ def get_attendance_session_token(
 def rescan_attendance_session(
     request: Request,
     sess: models.AttendanceSession = Depends(require_session_owner),
+    actor: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db),
 ):
     if sess.status != "open":
@@ -705,7 +710,7 @@ def rescan_attendance_session(
         db,
         action="rescan_start",
         result="success",
-        actor_user_id=sess.created_by,
+        actor_user_id=actor.id,
         client_ip=security.get_client_ip(request),
         target_type="attendance_session",
         target_id=sess.id,
@@ -722,6 +727,7 @@ def rescan_attendance_session(
 def rotate_attendance_session_token(
     request: Request,
     sess: models.AttendanceSession = Depends(require_session_owner),
+    actor: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db),
 ):
     if sess.status != "open":
@@ -736,7 +742,7 @@ def rotate_attendance_session_token(
         db,
         action="token_rotate",
         result="success",
-        actor_user_id=sess.created_by,
+        actor_user_id=actor.id,
         client_ip=security.get_client_ip(request),
         target_type="attendance_session",
         target_id=sess.id,
@@ -752,6 +758,7 @@ def rotate_attendance_session_token(
 def close_attendance_session(
     request: Request,
     sess: models.AttendanceSession = Depends(require_session_owner),
+    actor: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db),
 ):
     if sess.status != "open":
@@ -766,7 +773,7 @@ def close_attendance_session(
         db,
         action="session_close",
         result="success",
-        actor_user_id=sess.created_by,
+        actor_user_id=actor.id,
         client_ip=security.get_client_ip(request),
         target_type="attendance_session",
         target_id=sess.id,
@@ -804,9 +811,13 @@ def update_scheduled_start(
     変更本体と同じトランザクションに書くので，ログの書き込みが失敗したら
     変更もロールバックされる（記録の残らない変更を作らない）．
 
-    認可は `require_session_owner` に委ねる．`actor_user_id` には，他の教員向け
-    エンドポイントのように `sess.created_by` ではなくログイン中の教員本人を使う．
-    管理者が担当教員を変えた後は，作成者と操作者が別人になり得るため．
+    認可は `require_session_owner` に委ねる．`actor_user_id` には**ログイン中の
+    教員本人**を使う．管理者が担当教員を変えた後は，作成者と操作者が別人に
+    なり得るため．
+
+    **この扱いが正しいのはこのエンドポイントだけだった．** 他の4つ
+    （rescan / rotate-token / close / 出席訂正）は `sess.created_by` を使って
+    おり，担当教員を変えると旧担当の操作として記録されていた（2026-11-16 修正）。
     """
     reason = payload.reason.strip()
     if not reason:
@@ -1180,6 +1191,7 @@ def correct_attendance(
     payload: ManualCorrectionRequest,
     request: Request,
     sess: models.AttendanceSession = Depends(require_session_owner),
+    actor: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db),
 ):
     # reason は必須．空文字やスペースだけは400で拒否する（api-design.md）．
@@ -1249,15 +1261,17 @@ def correct_attendance(
     corrected_at = security.to_iso(now)
 
     # manual_corrections への記録と attendances の更新を同一トランザクションに
-    # する（phase3-tasks.md B-7）．sess.created_by をteacher_idに使うのは
-    # 他の教員向けエンドポイント（rescan等）と同じ考え方：require_session_owner
-    # を通った時点でログイン中の教員がそのセッションの担当（＝作成者）だと
-    # 確認済みなので，別途 Depends(require_login) で取り直す必要が無い．
+    # する（phase3-tasks.md B-7）．
+    #
+    # teacher_id には**操作した教員本人**を入れる．以前は `sess.created_by`
+    # （セッションを作った人）を入れており，管理者が担当教員を変えた後は
+    # **別人の名前で記録されていた**．訂正は出席記録を書き換えられる特権操作で，
+    # 「誰がやったか」が違うと追跡可能性そのものが成り立たない（2026-11-16 修正）。
     db.add(
         models.ManualCorrection(
             attendance_session_id=sess.id,
             target_user_id=user_id,
-            teacher_id=sess.created_by,
+            teacher_id=actor.id,
             before_status=before_status,
             after_status=payload.status,
             reason=reason,
@@ -1276,7 +1290,7 @@ def correct_attendance(
         db,
         action="manual_correction",
         result="success",
-        actor_user_id=sess.created_by,
+        actor_user_id=actor.id,
         client_ip=client_ip,
         target_type="attendance_session",
         target_id=sess.id,

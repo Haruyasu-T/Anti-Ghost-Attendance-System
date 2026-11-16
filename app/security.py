@@ -168,6 +168,16 @@ def classify_token(
     if not token:
         return TokenCheck.INVALID
 
+    # `hmac.compare_digest` は**非ASCIIの文字列を比較できず TypeError を投げる**．
+    # そのまま通すと，QRの中身に日本語などが入っていたときに拒否ではなく
+    # 500になる（実地の指摘で判明）。トークンは16進数なので，ここに非ASCIIが
+    # 来ている時点で不正であり，**他と同じ経路で拒否するのが正しい**．
+    #
+    # 早期に返してもタイミングから何も漏れない。分かるのは「送った文字が
+    # 非ASCIIだったか」だけで，それは送った側が元から知っている。
+    if not token.isascii():
+        return TokenCheck.INVALID
+
     settings = get_settings()
     at = at or _utcnow()
     window = _window_index(at, settings.qr_rotate_seconds)
@@ -486,6 +496,10 @@ def csrf_token_for_session(raw_session_id: str | None) -> str:
 def verify_csrf_token(raw_session_id: str | None, provided: str | None) -> bool:
     """送られてきたCSRFトークンが，そのセッションのものか判定する."""
     if not raw_session_id or not provided:
+        return False
+    # 非ASCIIだと compare_digest が TypeError になる（classify_token と同じ事情）。
+    # CSRFトークンは16進数なので，ここに来る時点で不正。例外にせず False を返す。
+    if not provided.isascii():
         return False
     # 比較は定数時間で行う（トークン検証と同じ理由）
     return hmac.compare_digest(csrf_token_for_session(raw_session_id), provided)

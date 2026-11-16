@@ -141,6 +141,39 @@ def test_token_with_another_salt_is_rejected():
     assert security.verify_token(1, new_salt, token, at=BASE) is False
 
 
+@pytest.mark.parametrize("token", [
+    "あいうえお",                     # 日本語だけ
+    "ｱｲｳｴｵ",                         # 半角カナ
+    "deadbeef日本語deadbeef",         # ASCIIに混ざっている
+    "café",                          # ラテン文字のアクセント
+    "🙂",                            # 絵文字
+    "\u0000deadbeef",                # NUL（ASCIIだが異常な値）
+])
+def test_non_ascii_token_is_rejected_not_an_error(token):
+    """非ASCIIのトークンが，例外ではなく「不正」として拒否されること.
+
+    `hmac.compare_digest` は非ASCIIの文字列を比較できず TypeError を投げる。
+    そのまま渡すと**拒否ではなく500**になっていた（実地の指摘で判明）。
+    QRの中身は攻撃者が自由に作れるので，不正な入力は不正として扱う必要がある。
+
+    NUL はASCIIなので compare_digest は通るが，正規のトークンと一致しない。
+    ここでは「落ちずに False を返す」ことまでを見ている。
+    """
+    salt = security.new_token_salt()
+
+    assert security.classify_token(1, salt, token, at=BASE) is security.TokenCheck.INVALID
+    assert security.verify_token(1, salt, token, at=BASE) is False
+
+
+@pytest.mark.parametrize("provided", ["あいうえお", "deadbeef日本語", "🙂"])
+def test_non_ascii_csrf_token_is_rejected_not_an_error(provided):
+    """CSRFトークンも同じ．非ASCIIで落ちないこと.
+
+    同じ `compare_digest` を使っているので、同じ問題がある。
+    """
+    assert security.verify_csrf_token("raw-session-id", provided) is False
+
+
 def test_tampered_token_is_rejected():
     """1文字書き換えたトークンが通らないこと."""
     salt = security.new_token_salt()
