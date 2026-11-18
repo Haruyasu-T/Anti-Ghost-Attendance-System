@@ -115,7 +115,11 @@ pushとPull Requestで GitHub Actions が自動実行します．テストとは
 
 ## 開発ルール
 
-`main` への直接コミットは禁止で，機能ブランチとPRレビューで進めています．詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください．
+担当B・担当Cは `main` から枝を切って push し，**担当Aが内容を見てから手元でマージします．** Pull Request を作ってもよいことにしていますが，必須にはしていません（レビューを1人に集約した理由は [decisions.md](docs/decisions.md) の D-23）．
+
+`main` は削除と force push を禁止しています（[D-29](docs/decisions.md)）．詳しくは [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください．
+
+セキュリティ上の問題の報告先は [SECURITY.md](SECURITY.md) に書いてあります．**Issueではなく，非公開の報告窓口を使ってください．**
 
 ## 製作者
 

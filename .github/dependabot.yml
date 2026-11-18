@@ -6,7 +6,7 @@
 # なるので、2つで組にしている。
 #
 # 更新はPRとして届く。CIのテストが通ることを必ず確認してからマージすること
-# （main への直接コミットは禁止。CONTRIBUTING.md）。
+# （マージは担当Aが行う。CONTRIBUTING.md）。
 #
 # 画面側のQRライブラリ（qrcodejs / html5-qrcode）はCDNのURLで読み込んで
 # いるので、ここでは追跡できない。THIRD-PARTY-LICENSES.md に版を書いて
