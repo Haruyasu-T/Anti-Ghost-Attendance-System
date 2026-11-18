@@ -51,14 +51,26 @@ Pull Requestを作ってもよい．変更の意図を残したいとき，相�
 
 ## mainの保護設定
 
-**現状，保護は効いていない．** GitHub Free の個人アカウント＋Privateリポジトリでは，Branch protection も Rulesets も使えないため（Rulesets は Team 以上，classic の Branch protection は Pro 以上）．
+**2026-11-18 に設定した．** public にしたことで，GitHub Free でも Rulesets が使えるようになったため（Private のままでは Rulesets も classic の Branch protection も使えなかった）．
 
-したがって以下は**全員が意識して守る運用ルール**であって，仕組みで強制されていない．
+ルールセット名は `main-protection`，対象は**既定ブランチ（`main`）のみ**，Enforcement は `Active`，bypass list は空（管理者も例外にしていない）．
 
-- `main` をテストが通らない状態で置かない
-- 担当B・担当Cの変更は，担当Aが見てからマージする
+| ルール | 意味 |
+|---|---|
+| Restrict deletions | `main` を削除できない |
+| Block force pushes | 履歴を書き換えて上書きできない |
 
-publicにすれば無料で保護が使えるようになるので，公開のタイミング（フェーズ5）で設定する．そのときに「Require status checks to pass before merging」も有効にする（CIは `.github/workflows/test.yml` で動いている）．
+`change/sql`（担当Bの未マージ作業）は**対象外**．対象を既定ブランチだけに絞ってあるため．作業中の枝なので，履歴を直すための force push を禁じる理由がない．
+
+意図して**入れていない**もの：
+
+- **Require a pull request before merging** — マージは担当Aが手元で行って直接 push する形（D-23・上の「作業の流れ」）なので，PRを必須にするとこの流れが止まる
+- **Require status checks to pass** — 一度入れたが外した．理由は [decisions.md](docs/decisions.md) の D-29 に書いた．**直push を含むすべての更新を止める**ため，手元マージして直push する流れと両立しない
+- **Require branches to be up to date before merging** — PR経由のマージにしか効かないので要らない
+
+保護が効いている以上，**間違ったコミットを push したら force push では戻せない．** 打ち消すコミットを足して直す．
+
+CIが落ちた状態の `main` を仕組みで防いではいない．**push する前に手元で `pytest` を通すこと**で守る運用ルールのままにしてある．
 
 ## コンフリクトを避けるために
 
@@ -89,7 +101,7 @@ CIで `npx prettier --check .` を見ているので，崩れたままだと落�
 
 ## コミットとリポジトリで気をつけること
 
-リポジトリは最終的に公開する予定なので，以下は絶対に入れない．
+**リポジトリは 2026-11-18 から public になっている．** 以下は絶対に入れない．
 
 - `TOKEN_SECRET` の値（`.env` は `.gitignore` 済み）
 - 実際の学内IPレンジ
