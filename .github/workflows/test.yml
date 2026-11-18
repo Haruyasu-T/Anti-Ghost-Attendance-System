@@ -1,9 +1,10 @@
 name: test
 
-on:
-  push:
-    branches: [main]
-  pull_request:
+# 枝への push でも走らせる。以前は `branches: [main]` を付けていたため，
+# PRを出さずに進めた枝は一度も検証されずに担当Aのマージまで来ていた。
+# 同じリポジトリの枝からPRを出すと push と pull_request で二重に走るが，
+# publicリポジトリでは Actions の実行が無料なので許容する。
+on: [push, pull_request]
 
 # このワークフローは読むだけで、リポジトリに書き込まない。
 # 明示しないと GITHUB_TOKEN にリポジトリ設定の既定の権限が付く。
