@@ -14,10 +14,14 @@
 version: 2
 updates:
   # Python のライブラリ（requirements.txt）
+  #
+  # 開発がひと段落したので weekly から monthly に落とした（2026-11-19）。
+  # 誰も見ない週次PRが積み上がるのを避けるため。脆弱性の通知（Dependabot
+  # alerts）は別経路なので、間隔を落としても気づきは遅れない。
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
