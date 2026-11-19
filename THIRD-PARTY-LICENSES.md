@@ -54,7 +54,7 @@ Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md)
 | uvicorn | 0.54.0 | BSD-3-Clause |
 | sqlalchemy | 2.1.8 | MIT |
 | pydantic | 2.14.3 | MIT |
-| python-multipart | 0.0.33 | Apache-2.0 |
+| python-multipart | 0.0.34 | Apache-2.0 |
 | jinja2 | 3.1.6 | BSD-3-Clause |
 | bcrypt | 5.0.0 | Apache-2.0 |
 | python-dotenv | 1.2.4 | BSD-3-Clause |
@@ -64,7 +64,7 @@ Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md)
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
 | pytest | 9.2.0 | MIT |
-| httpx2 | 2.16.0 | BSD-3-Clause |
+| httpx2 | 2.16.2 | BSD-3-Clause |
 
 ### 上記が引き込むもの
 
@@ -77,7 +77,7 @@ Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md)
 | anyio | 4.16.0 | MIT |
 | click | 8.5.1 | BSD-3-Clause |
 | h11 | 0.16.0 | MIT |
-| httpcore2 | 2.16.0 | BSD-3-Clause |
+| httpcore2 | 2.16.2 | BSD-3-Clause |
 | httptools | 0.9.0 | MIT |
 | idna | 3.20 | BSD-3-Clause |
 | iniconfig | 2.3.1 | MIT |
