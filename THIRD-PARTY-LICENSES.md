@@ -50,7 +50,7 @@ Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md)
 
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
-| fastapi | 0.162.2 | MIT |
+| fastapi | 0.163.1 | MIT |
 | uvicorn | 0.54.0 | BSD-3-Clause |
 | sqlalchemy | 2.1.8 | MIT |
 | pydantic | 2.14.3 | MIT |
@@ -72,7 +72,7 @@ Linux / Python 3.11 向けの一覧である（[decisions.md](docs/decisions.md)
 
 | パッケージ | バージョン | ライセンス |
 |---|---|---|
-| annotated-doc | 0.0.6 | MIT |
+| annotated-doc | 0.0.7 | MIT |
 | annotated-types | 0.8.0 | MIT |
 | anyio | 4.16.0 | MIT |
 | click | 8.5.1 | BSD-3-Clause |
